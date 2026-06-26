@@ -66,7 +66,7 @@ func main() {
 	opts, command, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: logbox --height 10 [--clear] [--plain] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] -- <command> [args...]")
 		os.Exit(2)
 	}
 
@@ -94,7 +94,7 @@ func parseArgs(args []string) (options, []string, error) {
 	fs.SetOutput(io.Discard)
 
 	opts := options{}
-	fs.IntVar(&opts.height, "height", 10, "tail lines to keep in the live view")
+	fs.IntVar(&opts.height, "height", autoHeightDefault(), "tail lines to keep in the live view")
 	fs.BoolVar(&opts.clear, "clear", false, "clear view on exit instead of printing final tail")
 	fs.BoolVar(&opts.plain, "plain", false, "disable TTY live rendering")
 	if err := fs.Parse(args[:idx]); err != nil {
@@ -108,6 +108,28 @@ func parseArgs(args []string) (options, []string, error) {
 		return options{}, nil, errors.New("missing command after --")
 	}
 	return opts, cmdArgs, nil
+}
+
+func autoHeightDefault() int {
+	fd := int(os.Stdout.Fd())
+	if !term.IsTerminal(fd) {
+		return 10
+	}
+
+	_, h, err := term.GetSize(fd)
+	if err != nil || h <= 0 {
+		return 10
+	}
+
+	defaultHeight := h / 3
+	if defaultHeight < 5 {
+		defaultHeight = 5
+	}
+	if defaultHeight > 30 {
+		defaultHeight = 30
+	}
+
+	return defaultHeight
 }
 
 func runPlain(command []string) int {
