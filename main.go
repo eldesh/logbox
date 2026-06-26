@@ -238,7 +238,7 @@ func runTUI(command []string, opts options) int {
 
 	stopSignals := forwardSignals(cmd)
 	commandText := strings.Join(command, " ")
-	program := tea.NewProgram(newModel(opts.height, commandText), tea.WithInput(nil))
+	program := tea.NewProgram(newModel(opts.height, commandText), tea.WithInput(os.Stdin))
 
 	lines := make(chan logLine, opts.height*2)
 	var readWG sync.WaitGroup
