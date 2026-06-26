@@ -67,8 +67,12 @@ type options struct {
 func main() {
 	opts, command, hasCommand, err := parseArgs(os.Args[1:])
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printUsage(os.Stdout)
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] [--tee FILE] [--append] [-- <command> [args...]]")
+		printUsage(os.Stderr)
 		os.Exit(2)
 	}
 
@@ -138,6 +142,26 @@ func parseArgs(args []string) (options, []string, bool, error) {
 		return options{}, nil, false, errors.New("missing command after --")
 	}
 	return opts, cmdArgs, true, nil
+}
+
+func printUsage(out *os.File) {
+	fmt.Fprintln(out, "logbox: tail-style live log wrapper")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Usage:")
+	fmt.Fprintln(out, "  logbox [flags] -- <command> [args...]")
+	fmt.Fprintln(out, "  producer | logbox [flags]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Flags:")
+	fmt.Fprintln(out, "  --height N    Number of lines in the live area (auto by terminal size by default)")
+	fmt.Fprintln(out, "  --clear       Clear the live area on exit instead of keeping final lines")
+	fmt.Fprintln(out, "  --plain       Disable live redraw and pass through output as plain logs")
+	fmt.Fprintln(out, "  --tee FILE    Also write output lines to FILE")
+	fmt.Fprintln(out, "  --append      Append to --tee FILE instead of truncating")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Examples:")
+	fmt.Fprintln(out, "  logbox --height 10 -- make test")
+	fmt.Fprintln(out, "  logbox --tee build.log --append -- docker build --progress=plain .")
+	fmt.Fprintln(out, "  cat app.log | logbox --plain --tee out.log")
 }
 
 func autoHeightDefault() int {
