@@ -65,14 +65,28 @@ type options struct {
 }
 
 func main() {
-	opts, command, err := parseArgs(os.Args[1:])
+	opts, command, hasCommand, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] [--tee FILE] [--append] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] [--tee FILE] [--append] [-- <command> [args...]]")
 		os.Exit(2)
 	}
 
 	isTTY := term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+
+	if !hasCommand {
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintln(os.Stderr, "no command specified and stdin is interactive")
+			os.Exit(2)
+		}
+
+		if opts.plain || !isTTY {
+			os.Exit(runStdinPlain(opts))
+		}
+
+		os.Exit(runStdinTUI(opts))
+	}
+
 	if opts.plain || !isTTY {
 		os.Exit(runPlainWithOptions(command, opts))
 	}
@@ -80,16 +94,13 @@ func main() {
 	os.Exit(runTUI(command, opts))
 }
 
-func parseArgs(args []string) (options, []string, error) {
+func parseArgs(args []string) (options, []string, bool, error) {
 	idx := -1
 	for i, a := range args {
 		if a == "--" {
 			idx = i
 			break
 		}
-	}
-	if idx == -1 {
-		return options{}, nil, errors.New("missing command separator --")
 	}
 
 	fs := flag.NewFlagSet("logbox", flag.ContinueOnError)
@@ -101,20 +112,32 @@ func parseArgs(args []string) (options, []string, error) {
 	fs.BoolVar(&opts.plain, "plain", false, "disable TTY live rendering")
 	fs.StringVar(&opts.tee, "tee", "", "write command output to file while still showing it")
 	fs.BoolVar(&opts.append, "append", false, "append to --tee file instead of truncating")
-	if err := fs.Parse(args[:idx]); err != nil {
-		return options{}, nil, err
+	parseTarget := args
+	if idx >= 0 {
+		parseTarget = args[:idx]
+	}
+	if err := fs.Parse(parseTarget); err != nil {
+		return options{}, nil, false, err
 	}
 	if opts.height < 1 {
-		return options{}, nil, errors.New("height must be >= 1")
+		return options{}, nil, false, errors.New("height must be >= 1")
 	}
 	if opts.append && opts.tee == "" {
-		return options{}, nil, errors.New("--append requires --tee")
+		return options{}, nil, false, errors.New("--append requires --tee")
 	}
+
+	if idx == -1 {
+		if len(fs.Args()) > 0 {
+			return options{}, nil, false, errors.New("command must follow --")
+		}
+		return opts, nil, false, nil
+	}
+
 	cmdArgs := args[idx+1:]
 	if len(cmdArgs) == 0 {
-		return options{}, nil, errors.New("missing command after --")
+		return options{}, nil, false, errors.New("missing command after --")
 	}
-	return opts, cmdArgs, nil
+	return opts, cmdArgs, true, nil
 }
 
 func autoHeightDefault() int {
@@ -167,6 +190,32 @@ func runPlainWithOptions(command []string, opts options) int {
 	err = cmd.Wait()
 	stopSignals()
 	return exitCodeFromError(err)
+}
+
+func runStdinPlain(opts options) int {
+	closeTee, teeWriter, err := setupTeeWriter(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		return 1
+	}
+	defer closeTee()
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Fprintln(os.Stdout, line)
+		if teeWriter != nil {
+			_, _ = fmt.Fprintln(teeWriter, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read stdin: %v\n", err)
+		return 1
+	}
+
+	return 0
 }
 
 func runTUI(command []string, opts options) int {
@@ -249,6 +298,44 @@ func runTUI(command []string, opts options) int {
 	}
 
 	return exitCode
+}
+
+func runStdinTUI(opts options) int {
+	buffer := newRingBuffer(opts.height)
+	renderer := newRegionRenderer(os.Stdout, opts.height)
+	closeTee, teeWriter, err := setupTeeWriter(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		return 1
+	}
+	defer closeTee()
+
+	renderer.reserve()
+	renderer.render("logbox reading: stdin", buffer.lines())
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if teeWriter != nil {
+			_, _ = fmt.Fprintln(teeWriter, line)
+		}
+		buffer.add(logLine{stream: "stdin", text: line})
+		renderer.render("logbox reading: stdin", buffer.lines())
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read stdin: %v\n", err)
+		return 1
+	}
+
+	if opts.clear {
+		renderer.clear()
+	} else {
+		renderer.render("logbox finished: stdin (exit 0)", buffer.lines())
+	}
+
+	return 0
 }
 
 func setupTeeWriter(opts options) (func(), io.Writer, error) {
