@@ -60,19 +60,21 @@ type options struct {
 	height int
 	clear  bool
 	plain  bool
+	tee    string
+	append bool
 }
 
 func main() {
 	opts, command, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: logbox [--height N] [--clear] [--plain] [--tee FILE] [--append] -- <command> [args...]")
 		os.Exit(2)
 	}
 
 	isTTY := term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 	if opts.plain || !isTTY {
-		os.Exit(runPlain(command))
+		os.Exit(runPlainWithOptions(command, opts))
 	}
 
 	os.Exit(runTUI(command, opts))
@@ -97,11 +99,16 @@ func parseArgs(args []string) (options, []string, error) {
 	fs.IntVar(&opts.height, "height", autoHeightDefault(), "tail lines to keep in the live view")
 	fs.BoolVar(&opts.clear, "clear", false, "clear view on exit instead of printing final tail")
 	fs.BoolVar(&opts.plain, "plain", false, "disable TTY live rendering")
+	fs.StringVar(&opts.tee, "tee", "", "write command output to file while still showing it")
+	fs.BoolVar(&opts.append, "append", false, "append to --tee file instead of truncating")
 	if err := fs.Parse(args[:idx]); err != nil {
 		return options{}, nil, err
 	}
 	if opts.height < 1 {
 		return options{}, nil, errors.New("height must be >= 1")
+	}
+	if opts.append && opts.tee == "" {
+		return options{}, nil, errors.New("--append requires --tee")
 	}
 	cmdArgs := args[idx+1:]
 	if len(cmdArgs) == 0 {
@@ -132,11 +139,24 @@ func autoHeightDefault() int {
 	return defaultHeight
 }
 
-func runPlain(command []string) int {
+func runPlainWithOptions(command []string, opts options) int {
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	closeTee, teeWriter, err := setupTeeWriter(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		return 1
+	}
+	defer closeTee()
+
+	if teeWriter != nil {
+		cmd.Stdout = io.MultiWriter(os.Stdout, teeWriter)
+		cmd.Stderr = io.MultiWriter(os.Stderr, teeWriter)
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start command: %v\n", err)
@@ -144,7 +164,7 @@ func runPlain(command []string) int {
 	}
 
 	stopSignals := forwardSignals(cmd)
-	err := cmd.Wait()
+	err = cmd.Wait()
 	stopSignals()
 	return exitCodeFromError(err)
 }
@@ -164,15 +184,16 @@ func runTUI(command []string, opts options) int {
 		return 1
 	}
 
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start command: %v\n", err)
-		return 1
-	}
-
-	stopSignals := forwardSignals(cmd)
 	commandText := strings.Join(command, " ")
 	buffer := newRingBuffer(opts.height)
 	renderer := newRegionRenderer(os.Stdout, opts.height)
+	closeTee, teeWriter, err := setupTeeWriter(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		return 1
+	}
+	defer closeTee()
+
 	renderer.reserve()
 	renderer.render("logbox running: "+commandText, buffer.lines())
 
@@ -182,6 +203,13 @@ func runTUI(command []string, opts options) int {
 	readWG.Add(2)
 	go readLines(stdout, "stdout", lines, &readWG)
 	go readLines(stderr, "stderr", lines, &readWG)
+
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start command: %v\n", err)
+		return 1
+	}
+
+	stopSignals := forwardSignals(cmd)
 
 	go func() {
 		readWG.Wait()
@@ -203,6 +231,9 @@ func runTUI(command []string, opts options) int {
 				lines = nil
 				continue
 			}
+			if teeWriter != nil {
+				_, _ = fmt.Fprintln(teeWriter, line.text)
+			}
 			buffer.add(line)
 			renderer.render("logbox running: "+commandText, buffer.lines())
 		case code := <-doneCh:
@@ -218,6 +249,28 @@ func runTUI(command []string, opts options) int {
 	}
 
 	return exitCode
+}
+
+func setupTeeWriter(opts options) (func(), io.Writer, error) {
+	if opts.tee == "" {
+		return func() {}, nil, nil
+	}
+
+	flags := os.O_CREATE | os.O_WRONLY
+	if opts.append {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+
+	f, err := os.OpenFile(opts.tee, flags, 0644)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return func() {
+		_ = f.Close()
+	}, f, nil
 }
 
 type regionRenderer struct {
