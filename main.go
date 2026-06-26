@@ -13,21 +13,12 @@ import (
 	"sync"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 )
 
 type logLine struct {
 	stream string
 	text   string
-}
-
-type lineMsg struct {
-	line logLine
-}
-
-type doneMsg struct {
-	exitCode int
 }
 
 type ringBuffer struct {
@@ -63,86 +54,6 @@ func (r *ringBuffer) lines() []logLine {
 		out = append(out, r.buf[(r.start+i)%r.capacity])
 	}
 	return out
-}
-
-type model struct {
-	buffer      *ringBuffer
-	height      int
-	termWidth   int
-	termHeight  int
-	commandText string
-	done        bool
-	exitCode    int
-}
-
-func newModel(height int, commandText string) model {
-	return model{
-		buffer:      newRingBuffer(height),
-		height:      height,
-		commandText: commandText,
-	}
-}
-
-func (m model) Init() tea.Cmd {
-	return nil
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch v := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.termWidth = v.Width
-		m.termHeight = v.Height
-		return m, nil
-	case lineMsg:
-		m.buffer.add(v.line)
-		return m, nil
-	case doneMsg:
-		m.done = true
-		m.exitCode = v.exitCode
-		return m, tea.Quit
-	default:
-		return m, nil
-	}
-}
-
-func (m model) View() string {
-	header := fmt.Sprintf("logbox running: %s", m.commandText)
-	lines := m.buffer.lines()
-
-	visible := m.height
-	if m.termHeight > 0 {
-		maxByWindow := m.termHeight - 2
-		if maxByWindow < 1 {
-			maxByWindow = 1
-		}
-		if visible > maxByWindow {
-			visible = maxByWindow
-		}
-	}
-
-	rendered := make([]string, 0, visible)
-	start := 0
-	if len(lines) > visible {
-		start = len(lines) - visible
-	}
-	for _, line := range lines[start:] {
-		rendered = append(rendered, line.text)
-	}
-	for len(rendered) < visible {
-		rendered = append(rendered, "")
-	}
-
-	content := header + "\n" + strings.Join(rendered, "\n")
-	if m.termHeight <= 0 {
-		return content
-	}
-
-	lineCount := 1 + visible
-	pad := m.termHeight - lineCount
-	if pad < 0 {
-		pad = 0
-	}
-	return strings.Repeat("\n", pad) + content
 }
 
 type options struct {
@@ -238,9 +149,13 @@ func runTUI(command []string, opts options) int {
 
 	stopSignals := forwardSignals(cmd)
 	commandText := strings.Join(command, " ")
-	program := tea.NewProgram(newModel(opts.height, commandText), tea.WithInput(os.Stdin))
+	buffer := newRingBuffer(opts.height)
+	renderer := newRegionRenderer(os.Stdout, opts.height)
+	renderer.reserve()
+	renderer.render("logbox running: "+commandText, buffer.lines())
 
 	lines := make(chan logLine, opts.height*2)
+	doneCh := make(chan int, 1)
 	var readWG sync.WaitGroup
 	readWG.Add(2)
 	go readLines(stdout, "stdout", lines, &readWG)
@@ -252,37 +167,92 @@ func runTUI(command []string, opts options) int {
 	}()
 
 	go func() {
-		for line := range lines {
-			program.Send(lineMsg{line: line})
-		}
-	}()
-
-	go func() {
 		err := cmd.Wait()
 		stopSignals()
-		program.Send(doneMsg{exitCode: exitCodeFromError(err)})
+		doneCh <- exitCodeFromError(err)
 	}()
 
-	finalModel, runErr := program.Run()
-	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "tui failed: %v\n", runErr)
-		return 1
-	}
-
-	m, ok := finalModel.(model)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "internal error: invalid final model")
-		return 1
-	}
-
-	if !opts.clear {
-		fmt.Printf("logbox finished: %s (exit %d)\n", commandText, m.exitCode)
-		for _, line := range m.buffer.lines() {
-			fmt.Println(line.text)
+	exitCode := 1
+	processDone := false
+	for lines != nil || !processDone {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				lines = nil
+				continue
+			}
+			buffer.add(line)
+			renderer.render("logbox running: "+commandText, buffer.lines())
+		case code := <-doneCh:
+			exitCode = code
+			processDone = true
 		}
 	}
 
-	return m.exitCode
+	if opts.clear {
+		renderer.clear()
+	} else {
+		renderer.render(fmt.Sprintf("logbox finished: %s (exit %d)", commandText, exitCode), buffer.lines())
+	}
+
+	return exitCode
+}
+
+type regionRenderer struct {
+	out    io.Writer
+	height int
+}
+
+func newRegionRenderer(out io.Writer, height int) *regionRenderer {
+	if height < 1 {
+		height = 1
+	}
+	return &regionRenderer{out: out, height: height}
+}
+
+func (r *regionRenderer) reserve() {
+	fmt.Fprint(r.out, strings.Repeat("\n", r.height))
+}
+
+func (r *regionRenderer) render(status string, lines []logLine) {
+	rows := make([]string, 0, r.height)
+	rows = append(rows, status)
+
+	availableLogs := r.height - 1
+	if availableLogs > 0 {
+		start := 0
+		if len(lines) > availableLogs {
+			start = len(lines) - availableLogs
+		}
+		for _, line := range lines[start:] {
+			rows = append(rows, line.text)
+		}
+	}
+
+	for len(rows) < r.height {
+		rows = append(rows, "")
+	}
+
+	fmt.Fprintf(r.out, "\x1b[%dA", r.height)
+	for i := 0; i < r.height; i++ {
+		fmt.Fprint(r.out, "\r\x1b[2K")
+		fmt.Fprint(r.out, rows[i])
+		if i < r.height-1 {
+			fmt.Fprint(r.out, "\n")
+		}
+	}
+	fmt.Fprint(r.out, "\x1b[1B\r")
+}
+
+func (r *regionRenderer) clear() {
+	fmt.Fprintf(r.out, "\x1b[%dA", r.height)
+	for i := 0; i < r.height; i++ {
+		fmt.Fprint(r.out, "\r\x1b[2K")
+		if i < r.height-1 {
+			fmt.Fprint(r.out, "\n")
+		}
+	}
+	fmt.Fprint(r.out, "\x1b[1B\r")
 }
 
 func readLines(r io.Reader, stream string, out chan<- logLine, wg *sync.WaitGroup) {
