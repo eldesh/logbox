@@ -38,14 +38,15 @@ func newRingBuffer(capacity int) *ringBuffer {
 	}
 }
 
-func (r *ringBuffer) add(line logLine) {
+func (r *ringBuffer) add(line logLine) bool {
 	if r.size < r.capacity {
 		r.buf[(r.start+r.size)%r.capacity] = line
 		r.size++
-		return
+		return false
 	}
 	r.buf[r.start] = line
 	r.start = (r.start + 1) % r.capacity
+	return true
 }
 
 func (r *ringBuffer) lines() []logLine {
@@ -58,10 +59,284 @@ func (r *ringBuffer) lines() []logLine {
 
 type options struct {
 	height int
+	history int
 	clear  bool
 	plain  bool
 	tee    string
 	append bool
+}
+
+type navCommand int
+
+const (
+	navUp navCommand = iota
+	navDown
+	navPageUp
+	navPageDown
+	navTop
+	navBottom
+	navFollow
+	navQuit
+)
+
+type inputController struct {
+	commands chan navCommand
+	tty      *os.File
+	closeTTY bool
+	oldState *term.State
+	done     chan struct{}
+	stopOnce sync.Once
+}
+
+func startInputController() (*inputController, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err == nil {
+		return startInputControllerWithTTY(tty, true)
+	}
+
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return startInputControllerWithTTY(os.Stdin, false)
+	}
+
+	return nil, fmt.Errorf("keyboard input unavailable: failed to open /dev/tty (%v)", err)
+}
+
+func startInputControllerWithTTY(tty *os.File, closeTTY bool) (*inputController, error) {
+	fd := int(tty.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		if closeTTY {
+			_ = tty.Close()
+		}
+		return nil, err
+	}
+
+	ic := &inputController{
+		commands: make(chan navCommand, 32),
+		tty:      tty,
+		closeTTY: closeTTY,
+		oldState: oldState,
+		done:     make(chan struct{}),
+	}
+
+	go ic.readLoop()
+	return ic, nil
+}
+
+func (ic *inputController) stop() {
+	ic.stopOnce.Do(func() {
+		close(ic.done)
+		if ic.oldState != nil {
+			_ = term.Restore(int(ic.tty.Fd()), ic.oldState)
+		}
+		if ic.closeTTY {
+			_ = ic.tty.Close()
+		}
+	})
+}
+
+func (ic *inputController) emit(cmd navCommand) {
+	select {
+	case ic.commands <- cmd:
+	default:
+	}
+}
+
+func (ic *inputController) readLoop() {
+	defer close(ic.commands)
+
+	r := bufio.NewReader(ic.tty)
+	for {
+		select {
+		case <-ic.done:
+			return
+		default:
+		}
+
+		b, err := r.ReadByte()
+		if err != nil {
+			return
+		}
+
+		switch b {
+		case 'k':
+			ic.emit(navUp)
+		case 'j':
+			ic.emit(navDown)
+		case 'u':
+			ic.emit(navPageUp)
+		case 'd':
+			ic.emit(navPageDown)
+		case 'g':
+			ic.emit(navTop)
+		case 'G':
+			ic.emit(navBottom)
+		case 'f', 'F':
+			ic.emit(navFollow)
+		case 'q', 'Q', '\r', '\n':
+			ic.emit(navQuit)
+		case '\x1b':
+			next, err := r.ReadByte()
+			if err != nil {
+				return
+			}
+			if next == 'O' {
+				code, err := r.ReadByte()
+				if err != nil {
+					return
+				}
+				switch code {
+				case 'A':
+					ic.emit(navUp)
+				case 'B':
+					ic.emit(navDown)
+				case 'H':
+					ic.emit(navTop)
+				case 'F':
+					ic.emit(navFollow)
+				}
+				continue
+			}
+			if next != '[' {
+				continue
+			}
+
+			code, err := r.ReadByte()
+			if err != nil {
+				return
+			}
+			switch code {
+			case 'A':
+				ic.emit(navUp)
+			case 'B':
+				ic.emit(navDown)
+			case 'H':
+				ic.emit(navTop)
+			case 'F':
+				ic.emit(navFollow)
+			case '5':
+				trail, err := r.ReadByte()
+				if err != nil {
+					return
+				}
+				if trail == '~' {
+					ic.emit(navPageUp)
+				}
+			case '6':
+				trail, err := r.ReadByte()
+				if err != nil {
+					return
+				}
+				if trail == '~' {
+					ic.emit(navPageDown)
+				}
+			}
+		}
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func clampInt(v, minV, maxV int) int {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func calcWindow(total, available, start int, follow bool) (int, int, int) {
+	if available < 0 {
+		available = 0
+	}
+	maxStart := maxInt(0, total-available)
+	if follow {
+		start = maxStart
+	} else {
+		start = clampInt(start, 0, maxStart)
+	}
+	end := start + available
+	if end > total {
+		end = total
+	}
+	return start, end, maxStart
+}
+
+func statusForCommand(commandText string, follow bool) string {
+	if follow {
+		return "logbox running: " + commandText + " | mode: FOLLOW (k/up:back, j/down:forward, f:end-follow)"
+	}
+	return "logbox running: " + commandText + " | mode: SCROLL (k/up:back, j/down:forward, f:end-follow)"
+}
+
+func statusForStdin(follow bool) string {
+	if follow {
+		return "logbox reading: stdin | mode: FOLLOW (k/up:back, j/down:forward, f:end-follow)"
+	}
+	return "logbox reading: stdin | mode: SCROLL (k/up:back, j/down:forward, f:end-follow)"
+}
+
+func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool) string {
+	if hold {
+		return fmt.Sprintf("logbox finished: %s (exit %d) | mode: SCROLL (q/enter:quit, f:end+quit)", commandText, exitCode)
+	}
+	if follow {
+		return fmt.Sprintf("logbox finished: %s (exit %d)", commandText, exitCode)
+	}
+	return fmt.Sprintf("logbox finished: %s (exit %d) | mode: SCROLL", commandText, exitCode)
+}
+
+func statusFinishedForStdin(follow bool, hold bool) string {
+	if hold {
+		return "logbox finished: stdin (exit 0) | mode: SCROLL (q/enter:quit, f:end+quit)"
+	}
+	if follow {
+		return "logbox finished: stdin (exit 0)"
+	}
+	return "logbox finished: stdin (exit 0) | mode: SCROLL"
+}
+
+func applyNav(cmd navCommand, linesCount, available, start int, follow bool) (int, bool) {
+	currentStart, _, maxStart := calcWindow(linesCount, available, start, follow)
+	start = currentStart
+	page := maxInt(1, available)
+
+	switch cmd {
+	case navUp:
+		follow = false
+		start--
+	case navDown:
+		follow = false
+		start++
+	case navPageUp:
+		follow = false
+		start -= page
+	case navPageDown:
+		follow = false
+		start += page
+	case navTop:
+		follow = false
+		start = 0
+	case navBottom:
+		follow = false
+		start = maxStart
+	case navFollow:
+		follow = true
+		start = maxStart
+	}
+
+	start = clampInt(start, 0, maxStart)
+	if follow {
+		start = maxStart
+	}
+	return start, follow
 }
 
 func main() {
@@ -112,6 +387,7 @@ func parseArgs(args []string) (options, []string, bool, error) {
 
 	opts := options{}
 	fs.IntVar(&opts.height, "height", autoHeightDefault(), "tail lines to keep in the live view")
+	fs.IntVar(&opts.history, "history", 1000, "lines to keep in scrollback history for TUI mode")
 	fs.BoolVar(&opts.clear, "clear", false, "clear view on exit instead of printing final tail")
 	fs.BoolVar(&opts.plain, "plain", false, "disable TTY live rendering")
 	fs.StringVar(&opts.tee, "tee", "", "write command output to file while still showing it")
@@ -125,6 +401,9 @@ func parseArgs(args []string) (options, []string, bool, error) {
 	}
 	if opts.height < 1 {
 		return options{}, nil, false, errors.New("height must be >= 1")
+	}
+	if opts.history < opts.height {
+		return options{}, nil, false, errors.New("history must be >= height")
 	}
 	if opts.append && opts.tee == "" {
 		return options{}, nil, false, errors.New("--append requires --tee")
@@ -152,14 +431,34 @@ func printUsage(out *os.File) {
 	fmt.Fprintln(out, "  producer | logbox [flags]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Flags:")
-	fmt.Fprintln(out, "  --height N    Number of lines in the live area (auto by terminal size by default)")
-	fmt.Fprintln(out, "  --clear       Clear the live area on exit instead of keeping final lines")
-	fmt.Fprintln(out, "  --plain       Disable live redraw and pass through output as plain logs")
-	fmt.Fprintln(out, "  --tee FILE    Also write output lines to FILE")
+	fmt.Fprintln(out, "  --height N    Live view height in lines (status line + visible logs)")
+	fmt.Fprintln(out, "               Default: auto (about 1/3 of terminal, min 5, max 30)")
+	fmt.Fprintln(out, "  --history N   Scrollback buffer size in lines for TUI mode")
+	fmt.Fprintln(out, "               Default: 1000 (must be >= --height)")
+	fmt.Fprintln(out, "  --clear       Clear the reserved live region on exit")
+	fmt.Fprintln(out, "               Default: keep final status/log lines")
+	fmt.Fprintln(out, "  --plain       Disable TUI redraw and pass output through as plain logs")
+	fmt.Fprintln(out, "  --tee FILE    Also write output to FILE")
 	fmt.Fprintln(out, "  --append      Append to --tee FILE instead of truncating")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "TUI Keys (while running):")
+	fmt.Fprintln(out, "  k / Up         Scroll up one line (switches to SCROLL mode)")
+	fmt.Fprintln(out, "  j / Down       Scroll down one line")
+	fmt.Fprintln(out, "  u / PageUp     Scroll up one page")
+	fmt.Fprintln(out, "  d / PageDown   Scroll down one page")
+	fmt.Fprintln(out, "  g              Jump to top of buffer")
+	fmt.Fprintln(out, "  G              Jump to bottom of buffer")
+	fmt.Fprintln(out, "  f              Return to FOLLOW mode (tail-follow)")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "After Process Exit:")
+	fmt.Fprintln(out, "  FOLLOW mode    logbox exits immediately")
+	fmt.Fprintln(out, "  SCROLL mode    logbox stays open for review")
+	fmt.Fprintln(out, "               q/Enter: quit, f: jump to end and quit")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Examples:")
 	fmt.Fprintln(out, "  logbox --height 10 -- make test")
+	fmt.Fprintln(out, "  logbox --height 10 --history 2000 -- make test")
+	fmt.Fprintln(out, "  logbox --height 14 --history 12000 -- bash -lc 'make lint && make test && make build'")
 	fmt.Fprintln(out, "  logbox --tee build.log --append -- docker build --progress=plain .")
 	fmt.Fprintln(out, "  cat app.log | logbox --plain --tee out.log")
 }
@@ -258,7 +557,7 @@ func runTUI(command []string, opts options) int {
 	}
 
 	commandText := strings.Join(command, " ")
-	buffer := newRingBuffer(opts.height)
+	buffer := newRingBuffer(opts.history)
 	renderer := newRegionRenderer(os.Stdout, opts.height)
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
@@ -268,7 +567,23 @@ func runTUI(command []string, opts options) int {
 	defer closeTee()
 
 	renderer.reserve()
-	renderer.render("logbox running: "+commandText, buffer.lines())
+	follow := true
+	viewStart := 0
+	renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+
+	inputController, err := startInputController()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
+		inputController = nil
+	}
+	if inputController != nil {
+		defer inputController.stop()
+	}
+
+	var navCh <-chan navCommand
+	if inputController != nil {
+		navCh = inputController.commands
+	}
 
 	lines := make(chan logLine, opts.height*2)
 	doneCh := make(chan int, 1)
@@ -297,7 +612,8 @@ func runTUI(command []string, opts options) int {
 
 	exitCode := 1
 	processDone := false
-	for lines != nil || !processDone {
+	holdAfterExit := false
+	for lines != nil || !processDone || holdAfterExit {
 		select {
 		case line, ok := <-lines:
 			if !ok {
@@ -307,25 +623,54 @@ func runTUI(command []string, opts options) int {
 			if teeWriter != nil {
 				_, _ = fmt.Fprintln(teeWriter, line.text)
 			}
-			buffer.add(line)
-			renderer.render("logbox running: "+commandText, buffer.lines())
+			overwritten := buffer.add(line)
+			if !follow && overwritten && viewStart > 0 {
+				viewStart--
+			}
+			renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+		case nav, ok := <-navCh:
+			if !ok {
+				navCh = nil
+				continue
+			}
+			available := opts.height - 1
+			viewStart, follow = applyNav(nav, buffer.size, available, viewStart, follow)
+			if nav == navQuit && processDone {
+				holdAfterExit = false
+				continue
+			}
+			if nav == navFollow && processDone {
+				holdAfterExit = false
+				continue
+			}
+			if processDone {
+				renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit), buffer.lines(), viewStart, follow)
+			} else {
+				renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+			}
 		case code := <-doneCh:
 			exitCode = code
 			processDone = true
+			holdAfterExit = !follow
+			renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit), buffer.lines(), viewStart, follow)
+		}
+
+		if holdAfterExit && navCh == nil {
+			holdAfterExit = false
 		}
 	}
 
 	if opts.clear {
 		renderer.clear()
-	} else {
-		renderer.render(fmt.Sprintf("logbox finished: %s (exit %d)", commandText, exitCode), buffer.lines())
+	} else if !holdAfterExit {
+		renderer.render(statusFinishedForCommand(commandText, exitCode, follow, false), buffer.lines(), viewStart, follow)
 	}
 
 	return exitCode
 }
 
 func runStdinTUI(opts options) int {
-	buffer := newRingBuffer(opts.height)
+	buffer := newRingBuffer(opts.history)
 	renderer := newRegionRenderer(os.Stdout, opts.height)
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
@@ -335,28 +680,93 @@ func runStdinTUI(opts options) int {
 	defer closeTee()
 
 	renderer.reserve()
-	renderer.render("logbox reading: stdin", buffer.lines())
+	follow := true
+	viewStart := 0
+	renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+
+	inputController, err := startInputController()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
+		inputController = nil
+	}
+	if inputController != nil {
+		defer inputController.stop()
+	}
+
+	var navCh <-chan navCommand
+	if inputController != nil {
+		navCh = inputController.commands
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if teeWriter != nil {
-			_, _ = fmt.Fprintln(teeWriter, line)
+
+	scanCh := make(chan string, opts.height*2)
+	scanDone := make(chan error, 1)
+	go func() {
+		for scanner.Scan() {
+			scanCh <- scanner.Text()
 		}
-		buffer.add(logLine{stream: "stdin", text: line})
-		renderer.render("logbox reading: stdin", buffer.lines())
+		close(scanCh)
+		scanDone <- scanner.Err()
+	}()
+
+	holdAfterExit := false
+	stdinDone := false
+	for scanCh != nil || holdAfterExit {
+		select {
+		case line, ok := <-scanCh:
+			if !ok {
+				scanCh = nil
+				stdinDone = true
+				holdAfterExit = !follow
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit), buffer.lines(), viewStart, follow)
+				continue
+			}
+			if teeWriter != nil {
+				_, _ = fmt.Fprintln(teeWriter, line)
+			}
+			overwritten := buffer.add(logLine{stream: "stdin", text: line})
+			if !follow && overwritten && viewStart > 0 {
+				viewStart--
+			}
+			renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+		case nav, ok := <-navCh:
+			if !ok {
+				navCh = nil
+				continue
+			}
+			available := opts.height - 1
+			viewStart, follow = applyNav(nav, buffer.size, available, viewStart, follow)
+			if nav == navQuit && stdinDone {
+				holdAfterExit = false
+				continue
+			}
+			if nav == navFollow && stdinDone {
+				holdAfterExit = false
+				continue
+			}
+			if stdinDone {
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit), buffer.lines(), viewStart, follow)
+			} else {
+				renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+			}
+		}
+
+		if holdAfterExit && navCh == nil {
+			holdAfterExit = false
+		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := <-scanDone; err != nil {
 		fmt.Fprintf(os.Stderr, "failed to read stdin: %v\n", err)
 		return 1
 	}
 
 	if opts.clear {
 		renderer.clear()
-	} else {
-		renderer.render("logbox finished: stdin (exit 0)", buffer.lines())
+	} else if !holdAfterExit {
+		renderer.render(statusFinishedForStdin(follow, false), buffer.lines(), viewStart, follow)
 	}
 
 	return 0
@@ -400,17 +810,14 @@ func (r *regionRenderer) reserve() {
 	fmt.Fprint(r.out, strings.Repeat("\n", r.height))
 }
 
-func (r *regionRenderer) render(status string, lines []logLine) {
+func (r *regionRenderer) render(status string, lines []logLine, start int, follow bool) {
 	rows := make([]string, 0, r.height)
 	rows = append(rows, status)
 
 	availableLogs := r.height - 1
 	if availableLogs > 0 {
-		start := 0
-		if len(lines) > availableLogs {
-			start = len(lines) - availableLogs
-		}
-		for _, line := range lines[start:] {
+		viewStart, viewEnd, _ := calcWindow(len(lines), availableLogs, start, follow)
+		for _, line := range lines[viewStart:viewEnd] {
 			rows = append(rows, line.text)
 		}
 	}
