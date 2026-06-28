@@ -79,6 +79,25 @@ const (
 	navQuit
 )
 
+const (
+	ansiReset = "\x1b[0m"
+	ansiBold  = "\x1b[1m"
+
+	ansiFgGreen = "\x1b[38;5;22m"
+	ansiFgWhite = "\x1b[38;5;231m"
+	ansiFgGray  = "\x1b[38;5;250m"
+
+	ansiBgGreen    = "\x1b[48;5;148m"
+	ansiBgGray     = "\x1b[48;5;239m"
+	ansiBgDarkGray = "\x1b[48;5;235m"
+)
+
+const (
+	statusStyleLead = ansiBold + ansiFgGreen + ansiBgGreen
+	statusStyleInfo = ansiFgWhite + ansiBgGray
+	statusStyleHint = ansiFgGray + ansiBgDarkGray
+)
+
 type inputController struct {
 	commands chan navCommand
 	tty      *os.File
@@ -269,38 +288,80 @@ func calcWindow(total, available, start int, follow bool) (int, int, int) {
 	return start, end, maxStart
 }
 
-func statusForCommand(commandText string, follow bool) string {
-	if follow {
-		return "logbox running: " + commandText + " | mode: FOLLOW (k/up:back, j/down:forward, f:end-follow)"
+func colorizeStatus(text, style string) string {
+	return style + text + ansiReset
+}
+
+func buildStatusLine(lead, info, hint string) string {
+	line := colorizeStatus(" "+lead+" ", statusStyleLead)
+	line += colorizeStatus(" "+info+" ", statusStyleInfo)
+	if hint != "" {
+		line += colorizeStatus(" ("+hint+") ", statusStyleHint)
 	}
-	return "logbox running: " + commandText + " | mode: SCROLL (k/up:back, j/down:forward, f:end-follow)"
+	return line
+}
+
+func modeText(follow bool) string {
+	if follow {
+		return "FOLLOW"
+	}
+	return "SCROLL"
+}
+
+func exitText(exitCode int) string {
+	return fmt.Sprintf("exit %d", exitCode)
+}
+
+func statusForCommand(commandText string, follow bool) string {
+	return buildStatusLine(
+		"RUNNING",
+		commandText+" | "+modeText(follow),
+		"k/up:back, j/down:forward, f:end-follow",
+	)
 }
 
 func statusForStdin(follow bool) string {
-	if follow {
-		return "logbox reading: stdin | mode: FOLLOW (k/up:back, j/down:forward, f:end-follow)"
-	}
-	return "logbox reading: stdin | mode: SCROLL (k/up:back, j/down:forward, f:end-follow)"
+	return buildStatusLine(
+		"READING",
+		"stdin | "+modeText(follow),
+		"k/up:back, j/down:forward, f:end-follow",
+	)
 }
 
 func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool) string {
 	if hold {
-		return fmt.Sprintf("logbox finished: %s (exit %d) | mode: SCROLL (q/enter:quit, f:end+quit)", commandText, exitCode)
+		return buildStatusLine(
+			"FINISHED",
+			commandText+" | SCROLL | "+exitText(exitCode),
+			"q/enter:quit, f:end+quit",
+		)
 	}
 	if follow {
-		return fmt.Sprintf("logbox finished: %s (exit %d)", commandText, exitCode)
+		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+" | "+exitText(exitCode), "")
 	}
-	return fmt.Sprintf("logbox finished: %s (exit %d) | mode: SCROLL", commandText, exitCode)
+	return buildStatusLine(
+		"FINISHED",
+		commandText+" | "+modeText(follow)+" | "+exitText(exitCode),
+		"",
+	)
 }
 
 func statusFinishedForStdin(follow bool, hold bool) string {
 	if hold {
-		return "logbox finished: stdin (exit 0) | mode: SCROLL (q/enter:quit, f:end+quit)"
+		return buildStatusLine(
+			"FINISHED",
+			"stdin | SCROLL | "+exitText(0),
+			"q/enter:quit, f:end+quit",
+		)
 	}
 	if follow {
-		return "logbox finished: stdin (exit 0)"
+		return buildStatusLine("FINISHED", "stdin | "+modeText(follow)+" | "+exitText(0), "")
 	}
-	return "logbox finished: stdin (exit 0) | mode: SCROLL"
+	return buildStatusLine(
+		"FINISHED",
+		"stdin | "+modeText(follow)+" | "+exitText(0),
+		"",
+	)
 }
 
 func applyNav(cmd navCommand, linesCount, available, start int, follow bool) (int, bool) {
