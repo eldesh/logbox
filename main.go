@@ -86,10 +86,12 @@ const (
 	ansiFgGreen = "\x1b[38;5;22m"
 	ansiFgWhite = "\x1b[38;5;231m"
 	ansiFgGray  = "\x1b[38;5;250m"
+	ansiFgDarkRed = "\x1b[38;5;88m"
 
 	ansiBgGreen    = "\x1b[48;5;148m"
 	ansiBgGray     = "\x1b[48;5;239m"
 	ansiBgDarkGray = "\x1b[48;5;235m"
+	ansiBgSoftRed  = "\x1b[48;5;217m"
 )
 
 const (
@@ -292,13 +294,17 @@ func colorizeStatus(text, style string) string {
 	return style + text + ansiReset
 }
 
-func buildStatusLine(lead, info, hint string) string {
-	line := colorizeStatus(" "+lead+" ", statusStyleLead)
-	line += colorizeStatus(" "+info+" ", statusStyleInfo)
+func buildStatusLineWithStyles(lead, info, hint, leadStyle, infoStyle, hintStyle string) string {
+	line := colorizeStatus(" "+lead+" ", leadStyle)
+	line += colorizeStatus(" "+info+" ", infoStyle)
 	if hint != "" {
-		line += colorizeStatus(" ("+hint+") ", statusStyleHint)
+		line += colorizeStatus(" ("+hint+") ", hintStyle)
 	}
 	return line
+}
+
+func buildStatusLine(lead, info, hint string) string {
+	return buildStatusLineWithStyles(lead, info, hint, statusStyleLead, statusStyleInfo, statusStyleHint)
 }
 
 func modeText(follow bool) string {
@@ -310,6 +316,15 @@ func modeText(follow bool) string {
 
 func exitText(exitCode int) string {
 	return fmt.Sprintf("exit %d", exitCode)
+}
+
+func exitFieldForInfo(exitCode int) string {
+	text := " " + exitText(exitCode) + " "
+	if exitCode == 0 {
+		return text
+	}
+	// Keep separators uncolored; only the final exit field gets a softer red accent.
+	return ansiFgDarkRed + ansiBgSoftRed + text + ansiReset + statusStyleInfo
 }
 
 func statusForCommand(commandText string, follow bool) string {
@@ -332,16 +347,16 @@ func statusFinishedForCommand(commandText string, exitCode int, follow bool, hol
 	if hold {
 		return buildStatusLine(
 			"FINISHED",
-			commandText+" | SCROLL | "+exitText(exitCode),
+			commandText+" | SCROLL |"+exitFieldForInfo(exitCode),
 			"q/enter:quit, f:end+quit",
 		)
 	}
 	if follow {
-		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+" | "+exitText(exitCode), "")
+		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+" |"+exitFieldForInfo(exitCode), "")
 	}
 	return buildStatusLine(
 		"FINISHED",
-		commandText+" | "+modeText(follow)+" | "+exitText(exitCode),
+		commandText+" | "+modeText(follow)+" |"+exitFieldForInfo(exitCode),
 		"",
 	)
 }
