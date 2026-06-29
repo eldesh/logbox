@@ -85,19 +85,19 @@ const (
 
 	ansiFgGreen = "\x1b[38;5;22m"
 	ansiFgWhite = "\x1b[38;5;231m"
-	ansiFgGray  = "\x1b[38;5;250m"
+	ansiFgDimWhite = "\x1b[38;5;252m"
 	ansiFgDarkRed = "\x1b[38;5;88m"
 
 	ansiBgGreen    = "\x1b[48;5;148m"
 	ansiBgGray     = "\x1b[48;5;239m"
-	ansiBgDarkGray = "\x1b[48;5;235m"
+	ansiBgDimGray  = "\x1b[48;5;237m"
 	ansiBgSoftRed  = "\x1b[48;5;217m"
 )
 
 const (
 	statusStyleLead = ansiBold + ansiFgGreen + ansiBgGreen
 	statusStyleInfo = ansiFgWhite + ansiBgGray
-	statusStyleHint = ansiFgGray + ansiBgDarkGray
+	statusStyleCommand = ansiFgDimWhite + ansiBgDimGray
 )
 
 type inputController struct {
@@ -294,62 +294,10 @@ func colorizeStatus(text, style string) string {
 	return style + text + ansiReset
 }
 
-func buildStatusLineWithStyles(lead, info, hint, leadStyle, infoStyle, hintStyle string) string {
-	line := colorizeStatus(" "+lead+" ", leadStyle)
-	line += colorizeStatus(" "+info+" ", infoStyle)
-	if hint != "" {
-		line += colorizeStatus(" ("+hint+") ", hintStyle)
-	}
+func buildStatusLine(lead, info string) string {
+	line := colorizeStatus(" "+lead+" ", statusStyleLead)
+	line += colorizeStatus(" "+info, statusStyleInfo)
 	return line
-}
-
-func buildStatusLine(lead, info, hint string) string {
-	return buildStatusLineWithStyles(lead, info, hint, statusStyleLead, statusStyleInfo, statusStyleHint)
-}
-
-func visibleLen(s string) int {
-	count := 0
-	for i := 0; i < len(s); {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			i += 2
-			for i < len(s) {
-				b := s[i]
-				i++
-				if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') {
-					break
-				}
-			}
-			continue
-		}
-		count++
-		i++
-	}
-	return count
-}
-
-func alignStatusRight(left, right string) string {
-	fd := int(os.Stdout.Fd())
-	if !term.IsTerminal(fd) {
-		return left + " " + right
-	}
-
-	width, _, err := term.GetSize(fd)
-	if err != nil || width <= 0 {
-		return left + " " + right
-	}
-
-	leftLen := visibleLen(left)
-	rightLen := visibleLen(right)
-	gap := width - leftLen - rightLen
-	if gap < 1 {
-		gap = 1
-	}
-
-	return left + strings.Repeat(" ", gap) + right
-}
-
-func infoCell(text string) string {
-	return colorizeStatus(" "+text+" ", statusStyleInfo)
 }
 
 func modeText(follow bool) string {
@@ -379,48 +327,41 @@ func exitFieldForInfo(exitCode int) string {
 		return text
 	}
 	// Keep separators uncolored; only the final exit field gets a softer red accent.
-	return ansiFgDarkRed + ansiBgSoftRed + text + ansiReset + statusStyleInfo
+	return ansiFgDarkRed + ansiBgSoftRed + text + ansiReset
+}
+
+func commandFieldForInfo(commandText string) string {
+	return statusStyleCommand + " " + commandText + " " + ansiReset + statusStyleInfo
 }
 
 func statusForCommand(commandText string, follow bool, teeInfo string) string {
-	left := buildStatusLine(
+	return buildStatusLine(
 		"RUNNING",
-		modeText(follow)+teeInfo,
-		"k/up:back, j/down:forward, f:end-follow",
+		modeText(follow)+teeInfo+" "+commandFieldForInfo(commandText),
 	)
-	right := infoCell(commandText)
-	return alignStatusRight(left, right)
 }
 
 func statusForStdin(follow bool, teeInfo string) string {
 	return buildStatusLine(
 		"READING",
 		"stdin | "+modeText(follow)+teeInfo,
-		"k/up:back, j/down:forward, f:end-follow",
 	)
 }
 
 func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool, teeInfo string) string {
-	right := statusStyleInfo + " " + commandText + " |" + exitFieldForInfo(exitCode) + ansiReset
-
 	if hold {
-		left := buildStatusLine(
+		return buildStatusLine(
 			"FINISHED",
-			"SCROLL"+teeInfo,
-			"q/enter:quit, f:end+quit",
+			"SCROLL"+teeInfo+" "+commandFieldForInfo(commandText)+exitFieldForInfo(exitCode),
 		)
-		return alignStatusRight(left, right)
 	}
 	if follow {
-		left := buildStatusLine("FINISHED", modeText(follow)+teeInfo, "")
-		return alignStatusRight(left, right)
+		return buildStatusLine("FINISHED", modeText(follow)+teeInfo+" "+commandFieldForInfo(commandText)+exitFieldForInfo(exitCode))
 	}
-	left := buildStatusLine(
+	return buildStatusLine(
 		"FINISHED",
-		modeText(follow)+teeInfo,
-		"",
+		modeText(follow)+teeInfo+" "+commandFieldForInfo(commandText)+exitFieldForInfo(exitCode),
 	)
-	return alignStatusRight(left, right)
 }
 
 func statusFinishedForStdin(follow bool, hold bool, teeInfo string) string {
@@ -428,16 +369,14 @@ func statusFinishedForStdin(follow bool, hold bool, teeInfo string) string {
 		return buildStatusLine(
 			"FINISHED",
 			"stdin | SCROLL"+teeInfo+" | "+exitText(0),
-			"q/enter:quit, f:end+quit",
 		)
 	}
 	if follow {
-		return buildStatusLine("FINISHED", "stdin | "+modeText(follow)+teeInfo+" | "+exitText(0), "")
+		return buildStatusLine("FINISHED", "stdin | "+modeText(follow)+teeInfo+" | "+exitText(0))
 	}
 	return buildStatusLine(
 		"FINISHED",
 		"stdin | "+modeText(follow)+teeInfo+" | "+exitText(0),
-		"",
 	)
 }
 
