@@ -318,6 +318,16 @@ func exitText(exitCode int) string {
 	return fmt.Sprintf("exit %d", exitCode)
 }
 
+func teeInfoText(opts options) string {
+	if opts.tee == "" {
+		return ""
+	}
+	if opts.append {
+		return " | >>" + opts.tee
+	}
+	return " | >" + opts.tee
+}
+
 func exitFieldForInfo(exitCode int) string {
 	text := " " + exitText(exitCode) + " "
 	if exitCode == 0 {
@@ -327,54 +337,54 @@ func exitFieldForInfo(exitCode int) string {
 	return ansiFgDarkRed + ansiBgSoftRed + text + ansiReset + statusStyleInfo
 }
 
-func statusForCommand(commandText string, follow bool) string {
+func statusForCommand(commandText string, follow bool, teeInfo string) string {
 	return buildStatusLine(
 		"RUNNING",
-		commandText+" | "+modeText(follow),
+		commandText+" | "+modeText(follow)+teeInfo,
 		"k/up:back, j/down:forward, f:end-follow",
 	)
 }
 
-func statusForStdin(follow bool) string {
+func statusForStdin(follow bool, teeInfo string) string {
 	return buildStatusLine(
 		"READING",
-		"stdin | "+modeText(follow),
+		"stdin | "+modeText(follow)+teeInfo,
 		"k/up:back, j/down:forward, f:end-follow",
 	)
 }
 
-func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool) string {
+func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool, teeInfo string) string {
 	if hold {
 		return buildStatusLine(
 			"FINISHED",
-			commandText+" | SCROLL |"+exitFieldForInfo(exitCode),
+			commandText+" | SCROLL"+teeInfo+" |"+exitFieldForInfo(exitCode),
 			"q/enter:quit, f:end+quit",
 		)
 	}
 	if follow {
-		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+" |"+exitFieldForInfo(exitCode), "")
+		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+teeInfo+" |"+exitFieldForInfo(exitCode), "")
 	}
 	return buildStatusLine(
 		"FINISHED",
-		commandText+" | "+modeText(follow)+" |"+exitFieldForInfo(exitCode),
+		commandText+" | "+modeText(follow)+teeInfo+" |"+exitFieldForInfo(exitCode),
 		"",
 	)
 }
 
-func statusFinishedForStdin(follow bool, hold bool) string {
+func statusFinishedForStdin(follow bool, hold bool, teeInfo string) string {
 	if hold {
 		return buildStatusLine(
 			"FINISHED",
-			"stdin | SCROLL | "+exitText(0),
+			"stdin | SCROLL"+teeInfo+" | "+exitText(0),
 			"q/enter:quit, f:end+quit",
 		)
 	}
 	if follow {
-		return buildStatusLine("FINISHED", "stdin | "+modeText(follow)+" | "+exitText(0), "")
+		return buildStatusLine("FINISHED", "stdin | "+modeText(follow)+teeInfo+" | "+exitText(0), "")
 	}
 	return buildStatusLine(
 		"FINISHED",
-		"stdin | "+modeText(follow)+" | "+exitText(0),
+		"stdin | "+modeText(follow)+teeInfo+" | "+exitText(0),
 		"",
 	)
 }
@@ -645,7 +655,8 @@ func runTUI(command []string, opts options) int {
 	renderer.reserve()
 	follow := true
 	viewStart := 0
-	renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+	teeInfo := teeInfoText(opts)
+	renderer.render(statusForCommand(commandText, follow, teeInfo), buffer.lines(), viewStart, follow)
 
 	inputController, err := startInputController()
 	if err != nil {
@@ -703,7 +714,7 @@ func runTUI(command []string, opts options) int {
 			if !follow && overwritten && viewStart > 0 {
 				viewStart--
 			}
-			renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+			renderer.render(statusForCommand(commandText, follow, teeInfo), buffer.lines(), viewStart, follow)
 		case nav, ok := <-navCh:
 			if !ok {
 				navCh = nil
@@ -720,15 +731,15 @@ func runTUI(command []string, opts options) int {
 				continue
 			}
 			if processDone {
-				renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit, teeInfo), buffer.lines(), viewStart, follow)
 			} else {
-				renderer.render(statusForCommand(commandText, follow), buffer.lines(), viewStart, follow)
+				renderer.render(statusForCommand(commandText, follow, teeInfo), buffer.lines(), viewStart, follow)
 			}
 		case code := <-doneCh:
 			exitCode = code
 			processDone = true
 			holdAfterExit = !follow
-			renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit), buffer.lines(), viewStart, follow)
+			renderer.render(statusFinishedForCommand(commandText, exitCode, follow, holdAfterExit, teeInfo), buffer.lines(), viewStart, follow)
 		}
 
 		if holdAfterExit && navCh == nil {
@@ -739,7 +750,7 @@ func runTUI(command []string, opts options) int {
 	if opts.clear {
 		renderer.clear()
 	} else if !holdAfterExit {
-		renderer.render(statusFinishedForCommand(commandText, exitCode, follow, false), buffer.lines(), viewStart, follow)
+		renderer.render(statusFinishedForCommand(commandText, exitCode, follow, false, teeInfo), buffer.lines(), viewStart, follow)
 	}
 
 	return exitCode
@@ -758,7 +769,8 @@ func runStdinTUI(opts options) int {
 	renderer.reserve()
 	follow := true
 	viewStart := 0
-	renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+	teeInfo := teeInfoText(opts)
+	renderer.render(statusForStdin(follow, teeInfo), buffer.lines(), viewStart, follow)
 
 	inputController, err := startInputController()
 	if err != nil {
@@ -796,7 +808,7 @@ func runStdinTUI(opts options) int {
 				scanCh = nil
 				stdinDone = true
 				holdAfterExit = !follow
-				renderer.render(statusFinishedForStdin(follow, holdAfterExit), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit, teeInfo), buffer.lines(), viewStart, follow)
 				continue
 			}
 			if teeWriter != nil {
@@ -806,7 +818,7 @@ func runStdinTUI(opts options) int {
 			if !follow && overwritten && viewStart > 0 {
 				viewStart--
 			}
-			renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+			renderer.render(statusForStdin(follow, teeInfo), buffer.lines(), viewStart, follow)
 		case nav, ok := <-navCh:
 			if !ok {
 				navCh = nil
@@ -823,9 +835,9 @@ func runStdinTUI(opts options) int {
 				continue
 			}
 			if stdinDone {
-				renderer.render(statusFinishedForStdin(follow, holdAfterExit), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit, teeInfo), buffer.lines(), viewStart, follow)
 			} else {
-				renderer.render(statusForStdin(follow), buffer.lines(), viewStart, follow)
+				renderer.render(statusForStdin(follow, teeInfo), buffer.lines(), viewStart, follow)
 			}
 		}
 
@@ -842,7 +854,7 @@ func runStdinTUI(opts options) int {
 	if opts.clear {
 		renderer.clear()
 	} else if !holdAfterExit {
-		renderer.render(statusFinishedForStdin(follow, false), buffer.lines(), viewStart, follow)
+		renderer.render(statusFinishedForStdin(follow, false, teeInfo), buffer.lines(), viewStart, follow)
 	}
 
 	return 0
