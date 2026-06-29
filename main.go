@@ -307,6 +307,51 @@ func buildStatusLine(lead, info, hint string) string {
 	return buildStatusLineWithStyles(lead, info, hint, statusStyleLead, statusStyleInfo, statusStyleHint)
 }
 
+func visibleLen(s string) int {
+	count := 0
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) {
+				b := s[i]
+				i++
+				if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') {
+					break
+				}
+			}
+			continue
+		}
+		count++
+		i++
+	}
+	return count
+}
+
+func alignStatusRight(left, right string) string {
+	fd := int(os.Stdout.Fd())
+	if !term.IsTerminal(fd) {
+		return left + " " + right
+	}
+
+	width, _, err := term.GetSize(fd)
+	if err != nil || width <= 0 {
+		return left + " " + right
+	}
+
+	leftLen := visibleLen(left)
+	rightLen := visibleLen(right)
+	gap := width - leftLen - rightLen
+	if gap < 1 {
+		gap = 1
+	}
+
+	return left + strings.Repeat(" ", gap) + right
+}
+
+func infoCell(text string) string {
+	return colorizeStatus(" "+text+" ", statusStyleInfo)
+}
+
 func modeText(follow bool) string {
 	if follow {
 		return "FOLLOW"
@@ -338,11 +383,13 @@ func exitFieldForInfo(exitCode int) string {
 }
 
 func statusForCommand(commandText string, follow bool, teeInfo string) string {
-	return buildStatusLine(
+	left := buildStatusLine(
 		"RUNNING",
-		commandText+" | "+modeText(follow)+teeInfo,
+		modeText(follow)+teeInfo,
 		"k/up:back, j/down:forward, f:end-follow",
 	)
+	right := infoCell(commandText)
+	return alignStatusRight(left, right)
 }
 
 func statusForStdin(follow bool, teeInfo string) string {
@@ -354,21 +401,26 @@ func statusForStdin(follow bool, teeInfo string) string {
 }
 
 func statusFinishedForCommand(commandText string, exitCode int, follow bool, hold bool, teeInfo string) string {
+	right := statusStyleInfo + " " + commandText + " |" + exitFieldForInfo(exitCode) + ansiReset
+
 	if hold {
-		return buildStatusLine(
+		left := buildStatusLine(
 			"FINISHED",
-			commandText+" | SCROLL"+teeInfo+" |"+exitFieldForInfo(exitCode),
+			"SCROLL"+teeInfo,
 			"q/enter:quit, f:end+quit",
 		)
+		return alignStatusRight(left, right)
 	}
 	if follow {
-		return buildStatusLine("FINISHED", commandText+" | "+modeText(follow)+teeInfo+" |"+exitFieldForInfo(exitCode), "")
+		left := buildStatusLine("FINISHED", modeText(follow)+teeInfo, "")
+		return alignStatusRight(left, right)
 	}
-	return buildStatusLine(
+	left := buildStatusLine(
 		"FINISHED",
-		commandText+" | "+modeText(follow)+teeInfo+" |"+exitFieldForInfo(exitCode),
+		modeText(follow)+teeInfo,
 		"",
 	)
+	return alignStatusRight(left, right)
 }
 
 func statusFinishedForStdin(follow bool, hold bool, teeInfo string) string {
