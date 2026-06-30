@@ -78,6 +78,8 @@ const (
 	navBottom
 	navFollow
 	navQuit
+	navInterrupt
+	navQuitSignal
 )
 
 const (
@@ -178,6 +180,10 @@ func (ic *inputController) readLoop() {
 		}
 
 		switch b {
+		case '\x03':
+			ic.emit(navInterrupt)
+		case '\x1c':
+			ic.emit(navQuitSignal)
 		case 'k':
 			ic.emit(navUp)
 		case 'j':
@@ -714,6 +720,26 @@ func runTUI(command []string, opts options) int {
 		case nav, ok := <-navCh:
 			if !ok {
 				navCh = nil
+				continue
+			}
+			if nav == navInterrupt {
+				if processDone {
+					holdAfterExit = false
+					continue
+				}
+				if cmd.Process != nil {
+					_ = cmd.Process.Signal(os.Interrupt)
+				}
+				continue
+			}
+			if nav == navQuitSignal {
+				if processDone {
+					holdAfterExit = false
+					continue
+				}
+				if cmd.Process != nil {
+					_ = cmd.Process.Signal(syscall.SIGQUIT)
+				}
 				continue
 			}
 			viewStart, follow = applyNav(nav, buffer.size, available, viewStart, follow)
