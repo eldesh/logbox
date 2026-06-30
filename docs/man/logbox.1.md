@@ -1,4 +1,4 @@
-% LOGBOX(1) logbox 0.1.0
+% LOGBOX 1 logbox 0.1.0
 
 # NAME
 
