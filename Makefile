@@ -8,14 +8,19 @@ MD2MAN_PKG := github.com/cpuguy83/go-md2man/v2@latest
 GO ?= go
 CGO_ENABLED ?= 0
 LDFLAGS ?=
+PREFIX ?= /usr/local
+DESTDIR ?=
+MANDIR ?= $(PREFIX)/share/man
+MAN1DIR ?= $(MANDIR)/man1
 
-.PHONY: help build install man clean rpi rpi-armv6 rpi-armv7 rpi-arm64
+.PHONY: help build install man install-man clean rpi rpi-armv6 rpi-armv7 rpi-arm64
 
 help:
 	@echo "Targets:"
 	@echo "  build       Build for current host"
 	@echo "  install     Install via 'go install' (set GOBIN to choose destination)"
 	@echo "  man         Generate man page at $(MAN_OUT)"
+	@echo "  install-man Install man page to $(DESTDIR)$(MAN1DIR)/$(APP).1"
 	@echo "  rpi         Build all Raspberry Pi targets (armv6, armv7, arm64)"
 	@echo "  rpi-armv6   Build for Raspberry Pi 1 / Zero (32-bit ARMv6)"
 	@echo "  rpi-armv7   Build for Raspberry Pi 2/3/4/5 with 32-bit OS (ARMv7)"
@@ -31,6 +36,10 @@ install:
 man:
 	mkdir -p $(MAN_DIR)
 	$(GO) run $(MD2MAN_PKG) < $(MAN_SRC) > $(MAN_OUT)
+
+install-man: man
+	install -d $(DESTDIR)$(MAN1DIR)
+	install -m 0644 $(MAN_OUT) $(DESTDIR)$(MAN1DIR)/$(APP).1
 
 rpi: rpi-armv6 rpi-armv7 rpi-arm64
 
@@ -49,3 +58,4 @@ rpi-arm64:
 clean:
 	$(RM) $(APP)
 	$(RM) $(DIST_DIR)/$(APP)-linux-armv6 $(DIST_DIR)/$(APP)-linux-armv7 $(DIST_DIR)/$(APP)-linux-arm64
+	$(RM) $(MAN_OUT)
