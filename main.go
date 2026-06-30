@@ -305,8 +305,19 @@ func modeText(follow bool) string {
 	return "SCROLL"
 }
 
-func elapsedText(startedAt time.Time) string {
-	d := time.Since(startedAt)
+func viewRangeText(total, available, start int, follow bool) string {
+	if total <= 0 || available <= 0 {
+		return "view: 0-0/0"
+	}
+	viewStart, viewEnd, _ := calcWindow(total, available, start, follow)
+	if viewEnd <= viewStart {
+		return fmt.Sprintf("view: 0-0/%d", total)
+	}
+	return fmt.Sprintf("view: %d-%d/%d", viewStart+1, viewEnd, total)
+}
+
+func elapsedText(startedAt, now time.Time) string {
+	d := now.Sub(startedAt)
 	if d < time.Minute {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
@@ -333,39 +344,39 @@ func exitFieldForInfo(exitCode int) string {
 	return ansiFgDarkRed + ansiBgSoftRed + text + ansiReset
 }
 
-func statusForCommand(follow bool, startedAt time.Time, lineCount int) string {
+func statusForCommand(follow bool, startedAt time.Time, lineCount, available, start int, now time.Time) string {
 	return buildStatusLine(
 		"RUNNING",
-		fmt.Sprintf("%s | lines:%d | %s ", modeText(follow), lineCount, elapsedText(startedAt)),
+		fmt.Sprintf("%s | %s | %s ", modeText(follow), viewRangeText(lineCount, available, start, follow), elapsedText(startedAt, now)),
 	)
 }
 
-func statusForStdin(follow bool, startedAt time.Time, lineCount int) string {
+func statusForStdin(follow bool, startedAt time.Time, lineCount, available, start int, now time.Time) string {
 	return buildStatusLine(
 		"READING",
-		fmt.Sprintf("stdin | %s | lines:%d | %s ", modeText(follow), lineCount, elapsedText(startedAt)),
+		fmt.Sprintf("stdin | %s | %s | %s ", modeText(follow), viewRangeText(lineCount, available, start, follow), elapsedText(startedAt, now)),
 	)
 }
 
 
-func statusFinishedForCommand(exitCode int, follow bool, hold bool, startedAt time.Time, lineCount int) string {
+func statusFinishedForCommand(exitCode int, follow bool, hold bool, startedAt, finishedAt time.Time, lineCount, available, start int) string {
 	mode := modeText(follow)
 	if hold {
 		mode = "SCROLL"
 	}
-	info := fmt.Sprintf("%s | lines:%d | %s |", mode, lineCount, elapsedText(startedAt))
+	info := fmt.Sprintf("%s | %s | %s |", mode, viewRangeText(lineCount, available, start, follow), elapsedText(startedAt, finishedAt))
 	if hold {
 		return buildStatusLine("FINISHED", info+exitFieldForInfo(exitCode))
 	}
 	return buildStatusLine("FINISHED", info+exitFieldForInfo(exitCode))
 }
 
-func statusFinishedForStdin(follow bool, hold bool, startedAt time.Time, lineCount int) string {
+func statusFinishedForStdin(follow bool, hold bool, startedAt, finishedAt time.Time, lineCount, available, start int) string {
 	mode := modeText(follow)
 	if hold {
 		mode = "SCROLL"
 	}
-	return buildStatusLine("FINISHED", fmt.Sprintf("stdin | %s | lines:%d | %s | %s", mode, lineCount, elapsedText(startedAt), exitText(0)))
+	return buildStatusLine("FINISHED", fmt.Sprintf("stdin | %s | %s | %s | %s", mode, viewRangeText(lineCount, available, start, follow), elapsedText(startedAt, finishedAt), exitText(0)))
 }
 
 func applyNav(cmd navCommand, linesCount, available, start int, follow bool) (int, bool) {
@@ -635,7 +646,9 @@ func runTUI(command []string, opts options) int {
 	viewStart := 0
 	lineCount := 0
 	startedAt := time.Now()
-	renderer.render(statusForCommand(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+	finishedAt := startedAt
+	available := opts.height - 1
+	renderer.render(statusForCommand(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 
 	inputController, err := startInputController()
 	if err != nil {
@@ -676,6 +689,9 @@ func runTUI(command []string, opts options) int {
 		doneCh <- exitCodeFromError(err)
 	}()
 
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
 	exitCode := 1
 	processDone := false
 	holdAfterExit := false
@@ -694,13 +710,12 @@ func runTUI(command []string, opts options) int {
 			if !follow && overwritten && viewStart > 0 {
 				viewStart--
 			}
-			renderer.render(statusForCommand(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+			renderer.render(statusForCommand(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 		case nav, ok := <-navCh:
 			if !ok {
 				navCh = nil
 				continue
 			}
-			available := opts.height - 1
 			viewStart, follow = applyNav(nav, buffer.size, available, viewStart, follow)
 			if nav == navQuit && processDone {
 				holdAfterExit = false
@@ -711,15 +726,20 @@ func runTUI(command []string, opts options) int {
 				continue
 			}
 			if processDone {
-				renderer.render(statusFinishedForCommand(exitCode, follow, holdAfterExit, startedAt, lineCount), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForCommand(exitCode, follow, holdAfterExit, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
 			} else {
-				renderer.render(statusForCommand(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+				renderer.render(statusForCommand(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 			}
 		case code := <-doneCh:
 			exitCode = code
 			processDone = true
+			finishedAt = time.Now()
 			holdAfterExit = !follow
-			renderer.render(statusFinishedForCommand(exitCode, follow, holdAfterExit, startedAt, lineCount), buffer.lines(), viewStart, follow)
+			renderer.render(statusFinishedForCommand(exitCode, follow, holdAfterExit, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
+		case <-ticker.C:
+			if !processDone {
+				renderer.render(statusForCommand(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
+			}
 		}
 
 		if holdAfterExit && navCh == nil {
@@ -730,7 +750,7 @@ func runTUI(command []string, opts options) int {
 	if opts.clear {
 		renderer.clear()
 	} else if !holdAfterExit {
-		renderer.render(statusFinishedForCommand(exitCode, follow, false, startedAt, lineCount), buffer.lines(), viewStart, follow)
+		renderer.render(statusFinishedForCommand(exitCode, follow, false, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
 	}
 
 	return exitCode
@@ -751,7 +771,9 @@ func runStdinTUI(opts options) int {
 	viewStart := 0
 	lineCount := 0
 	startedAt := time.Now()
-	renderer.render(statusForStdin(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+	finishedAt := startedAt
+	available := opts.height - 1
+	renderer.render(statusForStdin(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 
 	inputController, err := startInputController()
 	if err != nil {
@@ -780,6 +802,9 @@ func runStdinTUI(opts options) int {
 		scanDone <- scanner.Err()
 	}()
 
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
 	holdAfterExit := false
 	stdinDone := false
 	for scanCh != nil || holdAfterExit {
@@ -788,8 +813,9 @@ func runStdinTUI(opts options) int {
 			if !ok {
 				scanCh = nil
 				stdinDone = true
+				finishedAt = time.Now()
 				holdAfterExit = !follow
-				renderer.render(statusFinishedForStdin(follow, holdAfterExit, startedAt, lineCount), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
 				continue
 			}
 			if teeWriter != nil {
@@ -800,13 +826,12 @@ func runStdinTUI(opts options) int {
 			if !follow && overwritten && viewStart > 0 {
 				viewStart--
 			}
-			renderer.render(statusForStdin(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+			renderer.render(statusForStdin(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 		case nav, ok := <-navCh:
 			if !ok {
 				navCh = nil
 				continue
 			}
-			available := opts.height - 1
 			viewStart, follow = applyNav(nav, buffer.size, available, viewStart, follow)
 			if nav == navQuit && stdinDone {
 				holdAfterExit = false
@@ -817,9 +842,13 @@ func runStdinTUI(opts options) int {
 				continue
 			}
 			if stdinDone {
-				renderer.render(statusFinishedForStdin(follow, holdAfterExit, startedAt, lineCount), buffer.lines(), viewStart, follow)
+				renderer.render(statusFinishedForStdin(follow, holdAfterExit, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
 			} else {
-				renderer.render(statusForStdin(follow, startedAt, lineCount), buffer.lines(), viewStart, follow)
+				renderer.render(statusForStdin(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
+			}
+		case <-ticker.C:
+			if !stdinDone {
+				renderer.render(statusForStdin(follow, startedAt, lineCount, available, viewStart, time.Now()), buffer.lines(), viewStart, follow)
 			}
 		}
 
@@ -836,7 +865,7 @@ func runStdinTUI(opts options) int {
 	if opts.clear {
 		renderer.clear()
 	} else if !holdAfterExit {
-		renderer.render(statusFinishedForStdin(follow, false, startedAt, lineCount), buffer.lines(), viewStart, follow)
+		renderer.render(statusFinishedForStdin(follow, false, startedAt, finishedAt, lineCount, available, viewStart), buffer.lines(), viewStart, follow)
 	}
 
 	return 0
