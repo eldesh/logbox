@@ -944,7 +944,10 @@ func (r *regionRenderer) clear() {
 			fmt.Fprint(r.out, "\n")
 		}
 	}
-	fmt.Fprint(r.out, "\x1b[1B\r")
+	if r.height > 1 {
+		fmt.Fprintf(r.out, "\x1b[%dA", r.height-1)
+	}
+	fmt.Fprint(r.out, "\r")
 }
 
 func readLines(r io.Reader, stream string, out chan<- logLine, wg *sync.WaitGroup) {
