@@ -4,8 +4,8 @@ MAN_SRC := docs/man/$(APP).1.md
 MAN_DIR := $(DIST_DIR)/man
 MAN_OUT := $(MAN_DIR)/$(APP).1
 MD2MAN_PKG := github.com/cpuguy83/go-md2man/v2@latest
-RPI_ARCHES := armv6 armv7 arm64
-RPI_TARGETS := $(RPI_ARCHES:%=$(DIST_DIR)/$(APP)-linux-%)
+BIN_ARCHES := amd64 armv6 armv7 arm64
+BIN_TARGETS := $(BIN_ARCHES:%=$(DIST_DIR)/$(APP)-linux-%)
 
 
 GO ?= go
@@ -16,7 +16,7 @@ DESTDIR ?=
 MANDIR ?= $(PREFIX)/share/man
 MAN1DIR ?= $(MANDIR)/man1
 
-.PHONY: help build install man install-man clean rpi rpi-armv6 rpi-armv7 rpi-arm64 $(RPI_TARGETS)
+.PHONY: help build install man install-man clean bin $(BIN_ARCHES:%=bin-%) $(BIN_TARGETS)
 
 help:
 	@echo "Targets:"
@@ -24,10 +24,11 @@ help:
 	@echo "  install     Install via 'go install' (set GOBIN to choose destination)"
 	@echo "  man         Generate man page at $(MAN_OUT)"
 	@echo "  install-man Install man page to $(DESTDIR)$(MAN1DIR)/$(APP).1"
-	@echo "  rpi         Build all Raspberry Pi targets (armv6, armv7, arm64)"
-	@echo "  rpi-armv6   Build for Raspberry Pi 1 / Zero (32-bit ARMv6)"
-	@echo "  rpi-armv7   Build for Raspberry Pi 2/3/4/5 with 32-bit OS (ARMv7)"
-	@echo "  rpi-arm64   Build for Raspberry Pi 3/4/5 with 64-bit OS (ARM64)"
+	@echo "  bin         Build all binary targets (amd64, armv6, armv7, arm64)"
+	@echo "  bin-amd64   Build for AMD64 (x86_64)"
+	@echo "  bin-armv6   Build for 32-bit ARMv6"
+	@echo "  bin-armv7   Build for 32-bit ARMv7"
+	@echo "  bin-arm64   Build for 64-bit ARM64"
 	@echo "  clean       Remove built artifacts"
 
 build:
@@ -44,19 +45,20 @@ install-man: man
 	install -d $(DESTDIR)$(MAN1DIR)
 	install -m 0644 $(MAN_OUT) $(DESTDIR)$(MAN1DIR)/$(APP).1
 
-rpi: rpi-armv6 rpi-armv7 rpi-arm64
+bin: bin-amd64 bin-armv6 bin-armv7 bin-arm64
 
-rpi-armv6: GOARCH=arm GOARM=6
-rpi-armv7: GOARCH=arm GOARM=7
-rpi-arm64: GOARCH=arm64
+bin-amd64: GOARCH=amd64
+bin-armv6: GOARCH=arm GOARM=6
+bin-armv7: GOARCH=arm GOARM=7
+bin-arm64: GOARCH=arm64
 
-rpi-armv6 rpi-armv7 rpi-arm64: rpi-%: $(DIST_DIR)/$(APP)-linux-%
+bin-amd64 bin-armv6 bin-armv7 bin-arm64: bin-%: $(DIST_DIR)/$(APP)-linux-%
 
-$(RPI_TARGETS): $(DIST_DIR)/$(APP)-linux-%:
+$(BIN_TARGETS): $(DIST_DIR)/$(APP)-linux-%:
 	mkdir -p $(DIST_DIR)
 	GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -ldflags '$(LDFLAGS)' -o $@ .
 
 clean:
 	$(RM) $(APP)
-	$(RM) $(RPI_TARGETS)
+	$(RM) $(BIN_TARGETS)
 	$(RM) $(MAN_OUT)
