@@ -1,0 +1,20 @@
+name: logbox
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: logbox maintainers
+description: Tail-style live log wrapper with scrollback and follow mode.
+vendor: logbox
+homepage: https://github.com/eldesh/logbox
+contents:
+  - src: ${NFPM_BINARY}
+    dst: /usr/bin/logbox
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ./dist/man/logbox.1
+    dst: /usr/share/man/man1/logbox.1
+    file_info:
+      mode: 0644
