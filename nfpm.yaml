@@ -1,5 +1,5 @@
 name: logbox
-arch: ${NFPM_ARCH}
+arch: ${PKG_ARCH}
 platform: linux
 version: ${VERSION}
 section: utils
@@ -9,7 +9,7 @@ description: Tail-style live log wrapper with scrollback and follow mode.
 vendor: logbox
 homepage: https://github.com/eldesh/logbox
 contents:
-  - src: ${NFPM_BINARY}
+  - src: ${PKG_BIN}
     dst: /usr/bin/logbox
     expand: true
     file_info:
