@@ -57,16 +57,35 @@ install-man: $(MAN_OUT)
 
 bin: bin-amd64 bin-armv6 bin-armv7 bin-arm64
 
-bin-amd64: GOARCH=amd64
-bin-armv6: GOARCH=arm GOARM=6
-bin-armv7: GOARCH=arm GOARM=7
-bin-arm64: GOARCH=arm64
-
 bin-amd64 bin-armv6 bin-armv7 bin-arm64: bin-%: $(DIST_DIR)/$(APP)-linux-%
 
-$(BIN_TARGETS): $(DIST_DIR)/$(APP)-linux-%:
+
+# Parameters:
+#   $(1): Go target architecture.
+#        This value is passed to go build as GOARCH.
+#        Variant: amd64, arm, arm64
+#
+#   $(2): Go ARM version.
+#        This value is passed to go build as GOARM for 32-bit ARM builds.
+#        Leave empty for non-ARM and arm64 builds.
+#        Variant: empty, 6, 7
+define build_bin
 	mkdir -p $(DIST_DIR)
-	GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -ldflags '$(LDFLAGS)' -o $@ .
+	GOOS=linux GOARCH=$(1) GOARM=$(2) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -ldflags '$(LDFLAGS)' -o $@ .
+endef
+
+$(DIST_DIR)/$(APP)-linux-amd64:
+	$(call build_bin,amd64,)
+
+$(DIST_DIR)/$(APP)-linux-armv6:
+	$(call build_bin,arm,6)
+
+$(DIST_DIR)/$(APP)-linux-armv7:
+	$(call build_bin,arm,7)
+
+$(DIST_DIR)/$(APP)-linux-arm64:
+	$(call build_bin,arm64,)
+
 
 deb: deb-amd64 deb-armhf deb-arm64
 
@@ -84,7 +103,6 @@ deb-amd64 deb-armhf deb-arm64: deb-%: $(DIST_DIR)/$(APP)_$(VERSION)_%.deb
 #        and installs it into the package root as:
 #          $(PKGROOT)/usr/bin/$(APP)-linux-$(2)
 #        Variant: amd64, arm64, armv6
-#
 define build_deb
 	mkdir -p $(PKGROOT)/usr/bin $(PKGROOT)/usr/share/man/man1
 	cp $(DIST_DIR)/$(APP)-linux-$(2) $(PKGROOT)/usr/bin/$(APP)-linux-$(2)
