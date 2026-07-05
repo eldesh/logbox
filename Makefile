@@ -1,5 +1,6 @@
 APP         := logbox
-VERSION     ?= 0.1.0
+DEFAULT_VERSION := $(shell ./scripts/version.sh 2>/dev/null || echo 0.1.0-dev.0+gunknown)
+VERSION     ?= $(DEFAULT_VERSION)
 DIST_DIR    := dist
 MAN_SRC     := docs/man/$(APP).1.md
 MAN_DIR     := $(DIST_DIR)/man
