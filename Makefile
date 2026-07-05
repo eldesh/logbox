@@ -12,7 +12,7 @@ DEB_TARGETS := $(DEB_ARCHES:%=$(DIST_DIR)/$(APP)_$(VERSION)_%.deb)
 PKGROOT     := $(DIST_DIR)/pkgroot
 
 GO          ?= go
-NFPM        ?= nfpm
+NFPM        ?= $(GO) run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 CGO_ENABLED ?= 0
 LDFLAGS     ?=
 PREFIX      ?= /usr/local
