@@ -4,8 +4,10 @@ DIST_DIR    := dist
 MAN_SRC     := docs/man/$(APP).1.md
 MAN_DIR     := $(DIST_DIR)/man
 MAN_OUT     := $(MAN_DIR)/$(APP).1
-MD2MAN_PKG  := github.com/cpuguy83/go-md2man/v2@latest
-NFPM_PKG    := github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+MD2MAN_VER  ?= v2.0.7
+NFPM_VER    ?= v2.47.0
+MD2MAN_PKG  := github.com/cpuguy83/go-md2man/v2@$(MD2MAN_VER)
+NFPM_PKG    := github.com/goreleaser/nfpm/v2/cmd/nfpm@$(NFPM_VER)
 BIN_ARCHES  := amd64 armv6 armv7 arm64
 BIN_TARGETS := $(BIN_ARCHES:%=$(DIST_DIR)/$(APP)-linux-%)
 DEB_ARCHES  := amd64 armhf arm64
