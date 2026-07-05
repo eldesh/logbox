@@ -5,6 +5,7 @@ MAN_SRC     := docs/man/$(APP).1.md
 MAN_DIR     := $(DIST_DIR)/man
 MAN_OUT     := $(MAN_DIR)/$(APP).1
 MD2MAN_PKG  := github.com/cpuguy83/go-md2man/v2@latest
+NFPM_PKG    := github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 BIN_ARCHES  := amd64 armv6 armv7 arm64
 BIN_TARGETS := $(BIN_ARCHES:%=$(DIST_DIR)/$(APP)-linux-%)
 DEB_ARCHES  := amd64 armhf arm64
@@ -12,7 +13,6 @@ DEB_TARGETS := $(DEB_ARCHES:%=$(DIST_DIR)/$(APP)_$(VERSION)_%.deb)
 PKGROOT     := $(DIST_DIR)/pkgroot
 
 GO          ?= go
-NFPM        ?= $(GO) run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 CGO_ENABLED ?= 0
 LDFLAGS     ?=
 PREFIX      ?= /usr/local
@@ -107,7 +107,7 @@ define build_deb
 	mkdir -p $(PKGROOT)/usr/bin $(PKGROOT)/usr/share/man/man1
 	cp $(DIST_DIR)/$(APP)-linux-$(2) $(PKGROOT)/usr/bin/$(APP)-linux-$(2)
 	cp $(MAN_OUT) $(PKGROOT)/usr/share/man/man1/$(APP).1
-	VERSION=$(VERSION) PKG_ARCH=$(1) PKG_BIN=$(PKGROOT)/usr/bin/$(APP)-linux-$(2) $(NFPM) package --packager deb --config nfpm.yaml --target $@
+	VERSION=$(VERSION) PKG_ARCH=$(1) PKG_BIN=$(PKGROOT)/usr/bin/$(APP)-linux-$(2) $(GO) run $(NFPM_PKG) package --packager deb --config nfpm.yaml --target $@
 endef
 
 $(DIST_DIR)/$(APP)_$(VERSION)_amd64.deb: bin-amd64 $(MAN_OUT) nfpm.yaml
