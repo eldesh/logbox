@@ -2,10 +2,12 @@ name: logbox
 arch: ${PKG_ARCH}
 platform: linux
 version: ${VERSION}
+release: 1
 section: utils
 priority: optional
-maintainer: logbox maintainers
+maintainer: eldesh <nephits@gmail.com>
 description: Tail-style live log wrapper with scrollback and follow mode.
+license: MIT
 vendor: logbox
 homepage: https://github.com/eldesh/logbox
 contents:
@@ -16,5 +18,9 @@ contents:
       mode: 0755
   - src: ./dist/man/logbox.1
     dst: /usr/share/man/man1/logbox.1
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/logbox/LICENSE
     file_info:
       mode: 0644
