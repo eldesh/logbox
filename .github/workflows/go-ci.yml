@@ -3,7 +3,7 @@ name: Go CI
 on:
   push:
     branches:
-      - '**'
+      - master
   pull_request:
     branches:
       - master
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   checks:
-    name: Lint, Format, Test, Build
+    name: Lint, Format, Test, Build Binary And Deb
     runs-on: ubuntu-latest
 
     steps:
@@ -55,5 +55,17 @@ jobs:
       - name: Test
         run: go test -race ./...
 
-      - name: Build
-        run: go build ./...
+      - name: Build binaries
+        run: make bin
+
+      - name: Build deb packages
+        run: make deb
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logbox-dist-${{ github.event_name }}-${{ github.run_number }}
+          path: |
+            dist/logbox-linux-*
+            dist/logbox_*.deb
+          if-no-files-found: error
