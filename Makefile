@@ -16,6 +16,7 @@ DEB_TARGETS := $(DEB_ARCHES:%=$(DIST_DIR)/$(APP)_$(VERSION)_%.deb)
 PKGROOT     := $(DIST_DIR)/pkgroot
 
 GO          ?= go
+GOFMT       ?= gofmt
 CGO_ENABLED ?= 0
 LDFLAGS     ?=
 PREFIX      ?= /usr/local
@@ -23,12 +24,14 @@ DESTDIR     ?=
 MANDIR      ?= $(PREFIX)/share/man
 MAN1DIR     ?= $(MANDIR)/man1
 
-.PHONY: help build install man install-man clean bin deb $(BIN_ARCHES:%=bin-%) $(DEB_ARCHES:%=deb-%) $(BIN_TARGETS) $(DEB_TARGETS)
+.PHONY: help build install fmt fmt-check man install-man clean bin deb $(BIN_ARCHES:%=bin-%) $(DEB_ARCHES:%=deb-%) $(BIN_TARGETS) $(DEB_TARGETS)
 
 help:
 	@echo "Targets:"
 	@echo "  build       Build for current host"
 	@echo "  install     Install via 'go install' (set GOBIN to choose destination)"
+	@echo "  fmt         Format Go files with gofmt"
+	@echo "  fmt-check   Verify Go files are gofmt-formatted"
 	@echo "  man         Generate man page at $(MAN_OUT)"
 	@echo "  install-man Install man page to $(DESTDIR)$(MAN1DIR)/$(APP).1"
 	@echo "  bin         Build all binary targets (amd64, armv6, armv7, arm64)"
@@ -47,6 +50,16 @@ build:
 
 install:
 	$(GO) install -ldflags '$(LDFLAGS)' .
+
+fmt:
+	@$(GOFMT) -w .
+
+fmt-check:
+	@unfmt=$$($(GOFMT) -l .); \
+	if [ -n "$$unfmt" ]; then \
+		echo "$$unfmt"; \
+		exit 1; \
+	fi
 
 man: $(MAN_OUT)
 

@@ -35,18 +35,7 @@ jobs:
         run: go mod download
 
       - name: Verify gofmt
-        run: |
-          set -euo pipefail
-          files=$(git ls-files '*.go')
-          if [[ -z "${files}" ]]; then
-            exit 0
-          fi
-          unfmt=$(gofmt -l ${files})
-          if [[ -n "${unfmt}" ]]; then
-            echo "The following files are not gofmt-formatted:"
-            echo "${unfmt}"
-            exit 1
-          fi
+        run: make fmt-check
 
       - name: Verify go.mod / go.sum are tidy
         run: |

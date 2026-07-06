@@ -59,12 +59,12 @@ func (r *ringBuffer) lines() []logLine {
 }
 
 type options struct {
-	height int
+	height  int
 	history int
-	clear  bool
-	plain  bool
-	tee    string
-	append bool
+	clear   bool
+	plain   bool
+	tee     string
+	append  bool
 }
 
 type navCommand int
@@ -86,13 +86,13 @@ const (
 	ansiReset = "\x1b[0m"
 	ansiBold  = "\x1b[1m"
 
-	ansiFgGreen = "\x1b[38;5;22m"
-	ansiFgWhite = "\x1b[38;5;231m"
+	ansiFgGreen   = "\x1b[38;5;22m"
+	ansiFgWhite   = "\x1b[38;5;231m"
 	ansiFgDarkRed = "\x1b[38;5;88m"
 
-	ansiBgGreen    = "\x1b[48;5;148m"
-	ansiBgGray     = "\x1b[48;5;239m"
-	ansiBgSoftRed  = "\x1b[48;5;217m"
+	ansiBgGreen   = "\x1b[48;5;148m"
+	ansiBgGray    = "\x1b[48;5;239m"
+	ansiBgSoftRed = "\x1b[48;5;217m"
 )
 
 const (
@@ -363,7 +363,6 @@ func statusForStdin(follow bool, startedAt time.Time, lineCount, available, star
 		fmt.Sprintf("stdin | %s | %s | %s ", modeText(follow), viewRangeText(lineCount, available, start, follow), elapsedText(startedAt, now)),
 	)
 }
-
 
 func statusFinishedForCommand(exitCode int, follow bool, hold bool, startedAt, finishedAt time.Time, lineCount, available, start int) string {
 	mode := modeText(follow)
