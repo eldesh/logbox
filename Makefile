@@ -7,8 +7,10 @@ MAN_DIR     := $(DIST_DIR)/man
 MAN_OUT     := $(MAN_DIR)/$(APP).1
 MD2MAN_VER  ?= v2.0.7
 NFPM_VER    ?= v2.47.0
+GOLANGCI_LINT_VER ?= v2.4.0
 MD2MAN_PKG  := github.com/cpuguy83/go-md2man/v2@$(MD2MAN_VER)
 NFPM_PKG    := github.com/goreleaser/nfpm/v2/cmd/nfpm@$(NFPM_VER)
+GOLANGCI_LINT_PKG := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VER)
 BIN_ARCHES  := amd64 armv6 armv7 arm64
 BIN_TARGETS := $(BIN_ARCHES:%=$(DIST_DIR)/$(APP)-linux-%)
 DEB_ARCHES  := amd64 armhf arm64
@@ -24,7 +26,7 @@ DESTDIR     ?=
 MANDIR      ?= $(PREFIX)/share/man
 MAN1DIR     ?= $(MANDIR)/man1
 
-.PHONY: help build install fmt fmt-check man install-man clean bin deb $(BIN_ARCHES:%=bin-%) $(DEB_ARCHES:%=deb-%) $(BIN_TARGETS) $(DEB_TARGETS)
+.PHONY: help build install fmt fmt-check lint man install-man clean bin deb $(BIN_ARCHES:%=bin-%) $(DEB_ARCHES:%=deb-%) $(BIN_TARGETS) $(DEB_TARGETS)
 
 help:
 	@echo "Targets:"
@@ -32,6 +34,7 @@ help:
 	@echo "  install     Install via 'go install' (set GOBIN to choose destination)"
 	@echo "  fmt         Format Go files with gofmt"
 	@echo "  fmt-check   Verify Go files are gofmt-formatted"
+	@echo "  lint        Run golangci-lint"
 	@echo "  man         Generate man page at $(MAN_OUT)"
 	@echo "  install-man Install man page to $(DESTDIR)$(MAN1DIR)/$(APP).1"
 	@echo "  bin         Build all binary targets (amd64, armv6, armv7, arm64)"
@@ -60,6 +63,9 @@ fmt-check:
 		echo "$$unfmt"; \
 		exit 1; \
 	fi
+
+lint:
+	$(GO) run $(GOLANGCI_LINT_PKG) run --timeout=5m
 
 man: $(MAN_OUT)
 

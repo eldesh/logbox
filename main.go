@@ -427,7 +427,7 @@ func main() {
 			printUsage(os.Stdout)
 			os.Exit(0)
 		}
-		fmt.Fprintln(os.Stderr, err)
+		writeLine(os.Stderr, err)
 		printUsage(os.Stderr)
 		os.Exit(2)
 	}
@@ -436,7 +436,7 @@ func main() {
 
 	if !hasCommand {
 		if term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Fprintln(os.Stderr, "no command specified and stdin is interactive")
+			writeLine(os.Stderr, "no command specified and stdin is interactive")
 			os.Exit(2)
 		}
 
@@ -505,43 +505,55 @@ func parseArgs(args []string) (options, []string, bool, error) {
 }
 
 func printUsage(out *os.File) {
-	fmt.Fprintln(out, "logbox: tail-style live log wrapper")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  logbox [flags] -- <command> [args...]")
-	fmt.Fprintln(out, "  producer | logbox [flags]")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Flags:")
-	fmt.Fprintln(out, "  --height N    Live view height in lines (status line + visible logs)")
-	fmt.Fprintln(out, "               Default: auto (about 1/3 of terminal, min 5, max 30)")
-	fmt.Fprintln(out, "  --history N   Scrollback buffer size in lines for TUI mode")
-	fmt.Fprintln(out, "               Default: 1000 (must be >= --height)")
-	fmt.Fprintln(out, "  --clear       Clear the reserved live region on exit")
-	fmt.Fprintln(out, "               Default: keep final status/log lines")
-	fmt.Fprintln(out, "  --plain       Disable TUI redraw and pass output through as plain logs")
-	fmt.Fprintln(out, "  --tee FILE    Also write output to FILE")
-	fmt.Fprintln(out, "  --append      Append to --tee FILE instead of truncating")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "TUI Keys (while running):")
-	fmt.Fprintln(out, "  k / Up         Scroll up one line (switches to SCROLL mode)")
-	fmt.Fprintln(out, "  j / Down       Scroll down one line")
-	fmt.Fprintln(out, "  u / PageUp     Scroll up one page")
-	fmt.Fprintln(out, "  d / PageDown   Scroll down one page")
-	fmt.Fprintln(out, "  g              Jump to top of buffer")
-	fmt.Fprintln(out, "  G              Jump to bottom of buffer")
-	fmt.Fprintln(out, "  f              Return to FOLLOW mode (tail-follow)")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "After Process Exit:")
-	fmt.Fprintln(out, "  FOLLOW mode    logbox exits immediately")
-	fmt.Fprintln(out, "  SCROLL mode    logbox stays open for review")
-	fmt.Fprintln(out, "               q/Enter: quit, f: jump to end and quit")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Examples:")
-	fmt.Fprintln(out, "  logbox --height 10 -- make test")
-	fmt.Fprintln(out, "  logbox --height 10 --history 2000 -- make test")
-	fmt.Fprintln(out, "  logbox --height 14 --history 12000 -- bash -lc 'make lint && make test && make build'")
-	fmt.Fprintln(out, "  logbox --tee build.log --append -- docker build --progress=plain .")
-	fmt.Fprintln(out, "  cat app.log | logbox --plain --tee out.log")
+	writeLine(out, "logbox: tail-style live log wrapper")
+	writeLine(out)
+	writeLine(out, "Usage:")
+	writeLine(out, "  logbox [flags] -- <command> [args...]")
+	writeLine(out, "  producer | logbox [flags]")
+	writeLine(out)
+	writeLine(out, "Flags:")
+	writeLine(out, "  --height N    Live view height in lines (status line + visible logs)")
+	writeLine(out, "               Default: auto (about 1/3 of terminal, min 5, max 30)")
+	writeLine(out, "  --history N   Scrollback buffer size in lines for TUI mode")
+	writeLine(out, "               Default: 1000 (must be >= --height)")
+	writeLine(out, "  --clear       Clear the reserved live region on exit")
+	writeLine(out, "               Default: keep final status/log lines")
+	writeLine(out, "  --plain       Disable TUI redraw and pass output through as plain logs")
+	writeLine(out, "  --tee FILE    Also write output to FILE")
+	writeLine(out, "  --append      Append to --tee FILE instead of truncating")
+	writeLine(out)
+	writeLine(out, "TUI Keys (while running):")
+	writeLine(out, "  k / Up         Scroll up one line (switches to SCROLL mode)")
+	writeLine(out, "  j / Down       Scroll down one line")
+	writeLine(out, "  u / PageUp     Scroll up one page")
+	writeLine(out, "  d / PageDown   Scroll down one page")
+	writeLine(out, "  g              Jump to top of buffer")
+	writeLine(out, "  G              Jump to bottom of buffer")
+	writeLine(out, "  f              Return to FOLLOW mode (tail-follow)")
+	writeLine(out)
+	writeLine(out, "After Process Exit:")
+	writeLine(out, "  FOLLOW mode    logbox exits immediately")
+	writeLine(out, "  SCROLL mode    logbox stays open for review")
+	writeLine(out, "               q/Enter: quit, f: jump to end and quit")
+	writeLine(out)
+	writeLine(out, "Examples:")
+	writeLine(out, "  logbox --height 10 -- make test")
+	writeLine(out, "  logbox --height 10 --history 2000 -- make test")
+	writeLine(out, "  logbox --height 14 --history 12000 -- bash -lc 'make lint && make test && make build'")
+	writeLine(out, "  logbox --tee build.log --append -- docker build --progress=plain .")
+	writeLine(out, "  cat app.log | logbox --plain --tee out.log")
+}
+
+func writeLine(w io.Writer, args ...any) {
+	_, _ = fmt.Fprintln(w, args...)
+}
+
+func writeText(w io.Writer, args ...any) {
+	_, _ = fmt.Fprint(w, args...)
+}
+
+func writeFormat(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 func autoHeightDefault() int {
@@ -572,7 +584,7 @@ func runPlainWithOptions(command []string, opts options) int {
 
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		writeFormat(os.Stderr, "failed to open tee file: %v\n", err)
 		return 1
 	}
 	defer closeTee()
@@ -586,7 +598,7 @@ func runPlainWithOptions(command []string, opts options) int {
 	}
 
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start command: %v\n", err)
+		writeFormat(os.Stderr, "failed to start command: %v\n", err)
 		return 1
 	}
 
@@ -599,7 +611,7 @@ func runPlainWithOptions(command []string, opts options) int {
 func runStdinPlain(opts options) int {
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		writeFormat(os.Stderr, "failed to open tee file: %v\n", err)
 		return 1
 	}
 	defer closeTee()
@@ -608,14 +620,14 @@ func runStdinPlain(opts options) int {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Fprintln(os.Stdout, line)
+		writeLine(os.Stdout, line)
 		if teeWriter != nil {
 			_, _ = fmt.Fprintln(teeWriter, line)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read stdin: %v\n", err)
+		writeFormat(os.Stderr, "failed to read stdin: %v\n", err)
 		return 1
 	}
 
@@ -628,12 +640,12 @@ func runTUI(command []string, opts options) int {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open stdout pipe: %v\n", err)
+		writeFormat(os.Stderr, "failed to open stdout pipe: %v\n", err)
 		return 1
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open stderr pipe: %v\n", err)
+		writeFormat(os.Stderr, "failed to open stderr pipe: %v\n", err)
 		return 1
 	}
 
@@ -641,7 +653,7 @@ func runTUI(command []string, opts options) int {
 	renderer := newRegionRenderer(os.Stdout, opts.height)
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		writeFormat(os.Stderr, "failed to open tee file: %v\n", err)
 		return 1
 	}
 	defer closeTee()
@@ -657,7 +669,7 @@ func runTUI(command []string, opts options) int {
 
 	inputController, err := startInputController()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
+		writeFormat(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
 		inputController = nil
 	}
 	if inputController != nil {
@@ -677,7 +689,7 @@ func runTUI(command []string, opts options) int {
 	go readLines(stderr, "stderr", lines, &readWG)
 
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start command: %v\n", err)
+		writeFormat(os.Stderr, "failed to start command: %v\n", err)
 		return 1
 	}
 
@@ -786,7 +798,7 @@ func runStdinTUI(opts options) int {
 	renderer := newRegionRenderer(os.Stdout, opts.height)
 	closeTee, teeWriter, err := setupTeeWriter(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open tee file: %v\n", err)
+		writeFormat(os.Stderr, "failed to open tee file: %v\n", err)
 		return 1
 	}
 	defer closeTee()
@@ -802,7 +814,7 @@ func runStdinTUI(opts options) int {
 
 	inputController, err := startInputController()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
+		writeFormat(os.Stderr, "warning: keyboard navigation disabled: %v\n", err)
 		inputController = nil
 	}
 	if inputController != nil {
@@ -883,7 +895,7 @@ func runStdinTUI(opts options) int {
 	}
 
 	if err := <-scanDone; err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read stdin: %v\n", err)
+		writeFormat(os.Stderr, "failed to read stdin: %v\n", err)
 		return 1
 	}
 
@@ -931,7 +943,7 @@ func newRegionRenderer(out io.Writer, height int) *regionRenderer {
 }
 
 func (r *regionRenderer) reserve() {
-	fmt.Fprint(r.out, strings.Repeat("\n", r.height))
+	writeText(r.out, strings.Repeat("\n", r.height))
 }
 
 func (r *regionRenderer) render(status string, lines []logLine, start int, follow bool) {
@@ -950,29 +962,29 @@ func (r *regionRenderer) render(status string, lines []logLine, start int, follo
 		rows = append(rows, "")
 	}
 
-	fmt.Fprintf(r.out, "\x1b[%dA", r.height)
+	writeFormat(r.out, "\x1b[%dA", r.height)
 	for i := 0; i < r.height; i++ {
-		fmt.Fprint(r.out, "\r\x1b[2K")
-		fmt.Fprint(r.out, rows[i])
+		writeText(r.out, "\r\x1b[2K")
+		writeText(r.out, rows[i])
 		if i < r.height-1 {
-			fmt.Fprint(r.out, "\n")
+			writeText(r.out, "\n")
 		}
 	}
-	fmt.Fprint(r.out, "\x1b[1B\r")
+	writeText(r.out, "\x1b[1B\r")
 }
 
 func (r *regionRenderer) clear() {
-	fmt.Fprintf(r.out, "\x1b[%dA", r.height)
+	writeFormat(r.out, "\x1b[%dA", r.height)
 	for i := 0; i < r.height; i++ {
-		fmt.Fprint(r.out, "\r\x1b[2K")
+		writeText(r.out, "\r\x1b[2K")
 		if i < r.height-1 {
-			fmt.Fprint(r.out, "\n")
+			writeText(r.out, "\n")
 		}
 	}
 	if r.height > 1 {
-		fmt.Fprintf(r.out, "\x1b[%dA", r.height-1)
+		writeFormat(r.out, "\x1b[%dA", r.height-1)
 	}
-	fmt.Fprint(r.out, "\r")
+	writeText(r.out, "\r")
 }
 
 func readLines(r io.Reader, stream string, out chan<- logLine, wg *sync.WaitGroup) {
