@@ -12,8 +12,8 @@ if [ -n "$tag" ]; then
   patch="${base##*.}"
   next_patch=$((patch + 1))
   count="$(git rev-list "$tag"..HEAD --count 2>/dev/null || echo 0)"
-  printf "%s.%s.%s-dev.%s+g%s\n" "$major" "$minor" "$next_patch" "$count" "$sha"
+  printf "%s.%s.%s~dev.%s+g%s\n" "$major" "$minor" "$next_patch" "$count" "$sha"
 else
   count="$(git rev-list HEAD --count 2>/dev/null || echo 0)"
-  printf "0.1.0-dev.%s+g%s\n" "$count" "$sha"
+  printf "0.1.0~dev.%s+g%s\n" "$count" "$sha"
 fi
